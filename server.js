@@ -13,6 +13,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -39,6 +43,23 @@ function requireAdmin(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'unauthorized' });
   if (req.session.role !== 'admin') return res.status(403).json({ error: 'admin only' });
   next();
+}
+function canAccessLocation(req, loc) {
+  return req.session.role === 'admin' || loc.created_by === req.session.userId;
+}
+function getAccessibleLocation(req, id) {
+  const loc = db.prepare('SELECT * FROM locations WHERE id=?').get(id);
+  if (!loc || !canAccessLocation(req, loc)) return null;
+  return loc;
+}
+function getAccessibleFile(req, id) {
+  return db.prepare(`
+    SELECT f.*
+    FROM location_files f
+    JOIN locations l ON l.id = f.location_id
+    WHERE f.id=?
+      AND (?='admin' OR l.created_by=?)
+  `).get(id, req.session.role, req.session.userId);
 }
 
 // ---------- auth ----------
@@ -111,7 +132,7 @@ app.post('/api/admin/users/:id/role', requireAdmin, (req, res) => {
 
 // ---------- locations ----------
 app.get('/api/locations', requireAuth, (req, res) => {
-  const rows = db.prepare(`
+  const sql = `
     SELECT l.*, u.name AS created_by_name,
       (SELECT COUNT(*) FROM location_files WHERE location_id=l.id AND kind='raw') AS has_raw,
       (SELECT COUNT(*) FROM location_files WHERE location_id=l.id AND kind='blank') AS has_blank,
@@ -120,8 +141,10 @@ app.get('/api/locations', requireAuth, (req, res) => {
       (SELECT MAX(run_at) FROM placements WHERE location_id=l.id) AS last_run
     FROM locations l
     LEFT JOIN users u ON u.id = l.created_by
+    WHERE (?='admin' OR l.created_by=?)
     ORDER BY l.updated_at DESC
-  `).all();
+  `;
+  const rows = db.prepare(sql).all(req.session.role, req.session.userId);
   res.json({ locations: rows });
 });
 
@@ -138,7 +161,7 @@ app.post('/api/locations', requireAuth, (req, res) => {
 
 app.get('/api/locations/:id', requireAuth, (req, res) => {
   const id = parseInt(req.params.id);
-  const loc = db.prepare('SELECT * FROM locations WHERE id=?').get(id);
+  const loc = getAccessibleLocation(req, id);
   if (!loc) return res.status(404).json({ error: 'not found' });
   const files = db.prepare(`
     SELECT id, kind, filename, mime_type, size_bytes, uploaded_at FROM location_files
@@ -159,6 +182,8 @@ app.delete('/api/locations/:id', requireAdmin, (req, res) => {
 // ---------- files ----------
 app.post('/api/locations/:id/files', requireAuth, upload.single('file'), (req, res) => {
   const id = parseInt(req.params.id);
+  const loc = getAccessibleLocation(req, id);
+  if (!loc) return res.status(404).json({ error: 'not found' });
   const kind = req.body.kind;
   if (!['raw', 'blank', 'reference', 'floorplan'].includes(kind))
     return res.status(400).json({ error: 'invalid kind' });
@@ -177,7 +202,7 @@ app.post('/api/locations/:id/files', requireAuth, upload.single('file'), (req, r
 });
 
 app.get('/api/files/:id', requireAuth, (req, res) => {
-  const f = db.prepare('SELECT * FROM location_files WHERE id=?').get(parseInt(req.params.id));
+  const f = getAccessibleFile(req, parseInt(req.params.id));
   if (!f) return res.status(404).end();
   res.setHeader('Content-Type', f.mime_type || 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename="${f.filename}"`);
@@ -185,14 +210,16 @@ app.get('/api/files/:id', requireAuth, (req, res) => {
 });
 
 app.delete('/api/files/:id', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM location_files WHERE id=?').run(parseInt(req.params.id));
+  const f = getAccessibleFile(req, parseInt(req.params.id));
+  if (!f) return res.status(404).end();
+  db.prepare('DELETE FROM location_files WHERE id=?').run(f.id);
   res.json({ ok: true });
 });
 
 // ---------- placement run ----------
 app.post('/api/locations/:id/run', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
-  const loc = db.prepare('SELECT * FROM locations WHERE id=?').get(id);
+  const loc = getAccessibleLocation(req, id);
   if (!loc) return res.status(404).json({ error: 'not found' });
 
   const getFile = (kind) => db.prepare('SELECT * FROM location_files WHERE location_id=? AND kind=? ORDER BY uploaded_at DESC LIMIT 1').get(id, kind);
@@ -217,7 +244,7 @@ app.post('/api/locations/:id/run', requireAuth, async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, Date.now(), req.session.userId,
-      result.placed === result.beds ? 'success' : 'partial',
+      status,
       result.beds, result.placed,
       JSON.stringify(result.warnings || []),
       JSON.stringify(result.compliance || {}),
@@ -246,6 +273,8 @@ app.post('/api/locations/:id/run', requireAuth, async (req, res) => {
 
 app.get('/api/locations/:id/placement', requireAuth, (req, res) => {
   const id = parseInt(req.params.id);
+  const loc = getAccessibleLocation(req, id);
+  if (!loc) return res.status(404).json({ error: 'not found' });
   const p = db.prepare(`SELECT * FROM placements WHERE location_id=? ORDER BY run_at DESC LIMIT 1`).get(id);
   if (!p) return res.json({ placement: null });
   res.json({
