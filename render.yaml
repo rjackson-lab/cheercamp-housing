@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: cheercamp-housing
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data
+      - key: PARKER_EMAIL
+        sync: false
+      - key: PARKER_PW
+        sync: false
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

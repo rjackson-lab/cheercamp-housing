@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Locations · Cheer Camp Housing</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="vs-header">
+  <div class="vs-brand">
+    <span class="vs-brand-mark">UCA</span>
+    <span class="vs-brand-sub">Camp Housing</span>
+  </div>
+  <div class="vs-user-bar">
+    <span id="user-name"></span>
+    <a href="#" id="logout" style="color:#fff; opacity:0.85;">Sign out</a>
+  </div>
+</header>
+
+<main class="vs-page">
+  <div class="vs-flex-between vs-mb-lg">
+    <div>
+      <h1 style="margin:0; font-size:22px; color:var(--vs-navy);">Camp Locations</h1>
+      <div class="vs-muted" style="font-size:13px; margin-top:4px;">Select a location or create a new one</div>
+    </div>
+    <button class="vs-btn vs-btn-gold" id="new-location-btn">+ New Location</button>
+  </div>
+
+  <div id="location-grid" class="vs-card-grid"></div>
+  <div id="empty-state" class="vs-panel hidden">
+    <div class="vs-panel-body" style="text-align:center; padding:60px 20px;">
+      <div style="font-size:20px; font-weight:700; color:var(--vs-navy); margin-bottom:8px;">No locations yet</div>
+      <div class="vs-muted" style="margin-bottom:18px;">Create your first camp location to get started</div>
+      <button class="vs-btn" id="empty-create-btn">+ Create Location</button>
+    </div>
+  </div>
+</main>
+
+<!-- New location modal -->
+<div id="modal-new-location" class="vs-modal-bg hidden">
+  <div class="vs-modal">
+    <div class="vs-modal-header">New Location</div>
+    <div class="vs-modal-body">
+      <div class="vs-form-row">
+        <label class="vs-label">Location Name</label>
+        <input type="text" class="vs-input" id="new-loc-name" placeholder="e.g. UCF Session 1">
+      </div>
+      <div class="vs-form-row">
+        <label class="vs-label">Description (optional)</label>
+        <textarea class="vs-textarea" id="new-loc-desc" placeholder="Date range, notes, etc."></textarea>
+      </div>
+    </div>
+    <div class="vs-modal-footer">
+      <button class="vs-btn vs-btn-secondary" id="new-loc-cancel">Cancel</button>
+      <button class="vs-btn" id="new-loc-create">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function fmtDate(ts) { return ts ? new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'; }
+function escape(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+async function api(p, o) {
+  const r = await fetch(p, o);
+  if (r.status === 401) { window.location.href = '/'; return null; }
+  return r;
+}
+
+async function loadMe() {
+  const r = await api('/api/me'); if (!r) return;
+  const data = await r.json();
+  $('user-name').textContent = data.user.name;
+}
+
+async function loadLocations() {
+  const r = await api('/api/locations');
+  const { locations } = await r.json();
+  const grid = $('location-grid');
+  if (locations.length === 0) {
+    grid.classList.add('hidden');
+    $('empty-state').classList.remove('hidden');
+    return;
+  }
+  $('empty-state').classList.add('hidden');
+  grid.classList.remove('hidden');
+  grid.innerHTML = locations.map(l => {
+    const filesReady = [];
+    if (l.has_raw) filesReady.push('Raw');
+    if (l.has_blank) filesReady.push('Blank');
+    if (l.has_reference) filesReady.push('Reference');
+    if (l.floorplan_count) filesReady.push(`${l.floorplan_count} Floor Plans`);
+    return `
+      <div class="vs-card" data-id="${l.id}">
+        <div class="vs-card-title">${escape(l.name)}</div>
+        <div class="vs-card-meta">${escape(l.created_by_name || '—')} · ${fmtDate(l.created_at)}</div>
+        ${l.description ? `<div style="font-size:12px; color:var(--vs-text-mute); margin-bottom:10px;">${escape(l.description)}</div>` : ''}
+        <div style="font-size:11px; color:var(--vs-text-mute); margin-bottom:10px;">
+          ${filesReady.length ? filesReady.join(' · ') : '<em>No files yet</em>'}
+        </div>
+        <div class="vs-card-footer">
+          <span class="vs-status ${l.status}">${l.status.replace('_',' ')}</span>
+          <span style="font-size:11px; color:var(--vs-text-mute);">${l.last_run ? 'Last run ' + fmtDate(l.last_run) : 'Not yet run'}</span>
+        </div>
+      </div>`;
+  }).join('');
+  grid.querySelectorAll('.vs-card').forEach(c => c.onclick = () => window.location.href = `/location/${c.dataset.id}`);
+}
+
+$('new-location-btn').onclick = () => $('modal-new-location').classList.remove('hidden');
+$('empty-create-btn').onclick = () => $('modal-new-location').classList.remove('hidden');
+$('new-loc-cancel').onclick = () => $('modal-new-location').classList.add('hidden');
+$('new-loc-create').onclick = async () => {
+  const name = $('new-loc-name').value.trim();
+  const description = $('new-loc-desc').value.trim();
+  if (!name) { alert('Name required'); return; }
+  const r = await api('/api/locations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description })
+  });
+  const data = await r.json();
+  if (r.ok) window.location.href = `/location/${data.id}`;
+  else alert(data.error || 'Failed');
+};
+
+$('logout').onclick = async (e) => {
+  e.preventDefault();
+  await api('/api/logout', { method: 'POST' });
+  window.location.href = '/';
+};
+
+loadMe();
+loadLocations();
+</script>
+</body>
+</html>

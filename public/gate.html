@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cheer Camp Housing</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="vs-header">
+  <div class="vs-brand">
+    <span class="vs-brand-mark">UCA</span>
+    <span class="vs-brand-sub">Camp Housing Placement</span>
+  </div>
+</header>
+
+<main class="vs-page-narrow">
+  <div class="vs-panel">
+    <div class="vs-panel-header">
+      <span id="form-title">Sign In</span>
+    </div>
+    <div class="vs-panel-body">
+      <div id="alert-slot"></div>
+
+      <!-- LOGIN -->
+      <form id="login-form">
+        <div class="vs-form-row">
+          <label class="vs-label">Email</label>
+          <input type="email" class="vs-input" name="email" autocomplete="email" required>
+        </div>
+        <div class="vs-form-row">
+          <label class="vs-label">Password</label>
+          <input type="password" class="vs-input" name="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="vs-btn" style="width:100%">Sign In</button>
+        <div style="margin-top:14px; text-align:center; font-size:12px;">
+          Don't have an account?
+          <a href="#" id="show-signup">Request access</a>
+        </div>
+      </form>
+
+      <!-- SIGNUP -->
+      <form id="signup-form" class="hidden">
+        <div class="vs-form-row">
+          <label class="vs-label">Full Name</label>
+          <input type="text" class="vs-input" name="name" autocomplete="name" required>
+        </div>
+        <div class="vs-form-row">
+          <label class="vs-label">Email</label>
+          <input type="email" class="vs-input" name="email" autocomplete="email" required>
+        </div>
+        <div class="vs-form-row">
+          <label class="vs-label">Password</label>
+          <input type="password" class="vs-input" name="password" autocomplete="new-password" minlength="8" required>
+          <div style="font-size:11px; color:var(--vs-text-mute); margin-top:4px;">Minimum 8 characters</div>
+        </div>
+        <button type="submit" class="vs-btn" style="width:100%">Request Access</button>
+        <div style="margin-top:14px; text-align:center; font-size:12px;">
+          Have an account?
+          <a href="#" id="show-login">Sign in</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="vs-alert info" style="font-size:12px;">
+    New accounts require approval by <strong>Parker Jackson</strong> before access is granted.
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const loginForm = $('login-form');
+const signupForm = $('signup-form');
+const alertSlot = $('alert-slot');
+const formTitle = $('form-title');
+
+function showAlert(kind, msg) {
+  alertSlot.innerHTML = `<div class="vs-alert ${kind}">${msg}</div>`;
+}
+function clearAlert() { alertSlot.innerHTML = ''; }
+
+$('show-signup').onclick = (e) => {
+  e.preventDefault();
+  loginForm.classList.add('hidden');
+  signupForm.classList.remove('hidden');
+  formTitle.textContent = 'Request Access';
+  clearAlert();
+};
+$('show-login').onclick = (e) => {
+  e.preventDefault();
+  signupForm.classList.add('hidden');
+  loginForm.classList.remove('hidden');
+  formTitle.textContent = 'Sign In';
+  clearAlert();
+};
+
+loginForm.onsubmit = async (e) => {
+  e.preventDefault();
+  clearAlert();
+  const fd = new FormData(loginForm);
+  const r = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: fd.get('email'), password: fd.get('password') })
+  });
+  const data = await r.json();
+  if (r.ok) {
+    window.location.href = data.user.role === 'admin' ? '/admin' : '/app';
+  } else {
+    if (data.status === 'pending') {
+      showAlert('warn', 'Your account is awaiting approval by Parker Jackson.');
+    } else if (data.status === 'rejected') {
+      showAlert('error', 'Your account has been rejected.');
+    } else {
+      showAlert('error', data.error || 'Login failed');
+    }
+  }
+};
+
+signupForm.onsubmit = async (e) => {
+  e.preventDefault();
+  clearAlert();
+  const fd = new FormData(signupForm);
+  const r = await fetch('/api/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: fd.get('name'),
+      email: fd.get('email'),
+      password: fd.get('password')
+    })
+  });
+  const data = await r.json();
+  if (r.ok) {
+    signupForm.reset();
+    showAlert('success', 'Access request submitted. Parker Jackson will review and approve your account.');
+  } else {
+    showAlert('error', data.error || 'Signup failed');
+  }
+};
+</script>
+</body>
+</html>

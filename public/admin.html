@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin Dashboard · Cheer Camp Housing</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="vs-header">
+  <div class="vs-brand">
+    <span class="vs-brand-mark">UCA</span>
+    <span class="vs-brand-sub">Master Admin Dashboard</span>
+  </div>
+  <div class="vs-user-bar">
+    <span class="vs-pill">Admin</span>
+    <span id="user-name"></span>
+    <a href="#" id="logout" style="color:#fff; opacity:0.85;">Sign out</a>
+  </div>
+</header>
+
+<main class="vs-page">
+
+  <div class="vs-flex-between vs-mb-lg">
+    <div>
+      <h1 style="margin:0; font-size:22px; color:var(--vs-navy);">Camp Locations</h1>
+      <div class="vs-muted" style="font-size:13px; margin-top:4px;">All housing placement projects organized by completion status</div>
+    </div>
+    <button class="vs-btn vs-btn-gold" id="new-location-btn">+ New Location</button>
+  </div>
+
+  <div class="vs-stat-grid" id="stats">
+    <!-- filled by JS -->
+  </div>
+
+  <!-- Pending approvals -->
+  <div class="vs-panel">
+    <div class="vs-panel-header">
+      <span>Pending Access Requests <span id="pending-count" class="vs-status pending" style="margin-left:8px;">0</span></span>
+    </div>
+    <div class="vs-panel-body" id="pending-body" style="padding:0;">
+      <div style="padding:18px; color:var(--vs-text-mute); font-size:13px;">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Completed -->
+  <div class="vs-panel">
+    <div class="vs-panel-header">
+      <span>Completed <span id="completed-count" class="vs-status completed" style="margin-left:8px;">0</span></span>
+    </div>
+    <div class="vs-panel-body" id="completed-body">
+      <div class="vs-muted">No completed locations yet.</div>
+    </div>
+  </div>
+
+  <!-- In process -->
+  <div class="vs-panel">
+    <div class="vs-panel-header">
+      <span>In Process <span id="inprocess-count" class="vs-status in_process" style="margin-left:8px;">0</span></span>
+    </div>
+    <div class="vs-panel-body" id="inprocess-body">
+      <div class="vs-muted">Nothing in progress.</div>
+    </div>
+  </div>
+
+  <!-- Errors / Not started -->
+  <div class="vs-panel">
+    <div class="vs-panel-header">
+      <span>Errors / Not Completed <span id="errors-count" class="vs-status errors" style="margin-left:8px;">0</span></span>
+    </div>
+    <div class="vs-panel-body" id="errors-body">
+      <div class="vs-muted">No errored or unstarted locations.</div>
+    </div>
+  </div>
+
+  <!-- All users -->
+  <div class="vs-panel">
+    <div class="vs-panel-header">
+      <span>All Users</span>
+    </div>
+    <div class="vs-panel-body" id="users-body" style="padding:0;">
+      <div style="padding:18px; color:var(--vs-text-mute); font-size:13px;">Loading…</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- New location modal -->
+<div id="modal-new-location" class="vs-modal-bg hidden">
+  <div class="vs-modal">
+    <div class="vs-modal-header">New Location</div>
+    <div class="vs-modal-body">
+      <div class="vs-form-row">
+        <label class="vs-label">Location Name</label>
+        <input type="text" class="vs-input" id="new-loc-name" placeholder="e.g. UCF Session 1">
+      </div>
+      <div class="vs-form-row">
+        <label class="vs-label">Description (optional)</label>
+        <textarea class="vs-textarea" id="new-loc-desc" placeholder="Date range, notes, etc."></textarea>
+      </div>
+    </div>
+    <div class="vs-modal-footer">
+      <button class="vs-btn vs-btn-secondary" id="new-loc-cancel">Cancel</button>
+      <button class="vs-btn" id="new-loc-create">Create</button>
+    </div>
+  </div>
+</div>
+
+<script src="/admin.js"></script>
+</body>
+</html>

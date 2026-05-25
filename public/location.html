@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Location · Cheer Camp Housing</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="vs-header">
+  <div class="vs-brand">
+    <a href="/" style="color:var(--vs-gold); text-decoration:none; font-weight:800; font-size:22px; letter-spacing:0.08em;">UCA</a>
+    <span class="vs-brand-sub">Camp Housing</span>
+  </div>
+  <div class="vs-user-bar">
+    <a href="#" id="back-link" style="color:#fff; opacity:0.85;">← Back</a>
+    <span id="user-name"></span>
+  </div>
+</header>
+
+<main class="vs-page">
+  <div id="header-block"></div>
+
+  <div class="vs-panel">
+    <div class="vs-panel-header">
+      <span>1. Upload Files</span>
+    </div>
+    <div class="vs-panel-body">
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:14px;">
+        <div class="upload-slot" data-kind="raw">
+          <div class="vs-label">Raw Roster Data <span style="color:var(--vs-error)">*</span></div>
+          <div class="upload-status" id="status-raw">No file</div>
+          <input type="file" accept=".xlsx,.xls" data-kind="raw" class="file-input" hidden>
+          <button class="vs-btn vs-btn-sm vs-btn-secondary" data-upload="raw">Choose file…</button>
+        </div>
+        <div class="upload-slot" data-kind="blank">
+          <div class="vs-label">Blank Template <span style="color:var(--vs-error)">*</span></div>
+          <div class="upload-status" id="status-blank">No file</div>
+          <input type="file" accept=".xlsx,.xls" data-kind="blank" class="file-input" hidden>
+          <button class="vs-btn vs-btn-sm vs-btn-secondary" data-upload="blank">Choose file…</button>
+        </div>
+        <div class="upload-slot" data-kind="reference">
+          <div class="vs-label">Reference Template <span class="vs-muted">(optional)</span></div>
+          <div class="upload-status" id="status-reference">No file</div>
+          <input type="file" accept=".xlsx,.xls" data-kind="reference" class="file-input" hidden>
+          <button class="vs-btn vs-btn-sm vs-btn-secondary" data-upload="reference">Choose file…</button>
+        </div>
+        <div class="upload-slot" data-kind="floorplan">
+          <div class="vs-label">Floor Plans <span class="vs-muted">(multiple PDFs)</span></div>
+          <div class="upload-status" id="status-floorplan">0 files</div>
+          <input type="file" accept=".pdf" data-kind="floorplan" class="file-input" hidden>
+          <button class="vs-btn vs-btn-sm vs-btn-secondary" data-upload="floorplan">Add floor plan…</button>
+        </div>
+      </div>
+      <div id="files-table-block" style="margin-top:18px;"></div>
+    </div>
+  </div>
+
+  <div class="vs-panel">
+    <div class="vs-panel-header">
+      <span>2. Run Placement</span>
+      <button class="vs-btn vs-btn-gold" id="run-btn" disabled>Run Placement Engine</button>
+    </div>
+    <div class="vs-panel-body" id="run-results">
+      <div class="vs-muted" style="font-size:13px;">Upload the raw roster + blank template, then run.</div>
+    </div>
+  </div>
+
+  <div class="vs-panel hidden" id="download-panel">
+    <div class="vs-panel-header">
+      <span>3. Download Roster</span>
+    </div>
+    <div class="vs-panel-body">
+      <div id="download-content"></div>
+    </div>
+  </div>
+</main>
+
+<script src="/location.js"></script>
+</body>
+</html>
