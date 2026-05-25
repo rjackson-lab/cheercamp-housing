@@ -1,5 +1,7 @@
 # Cheer Camp Housing — Multi-Location Web App
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/rjackson-lab/cheercamp-housing)
+
 A multi-user housing placement tool for cheer camp operations. Parker Jackson (master admin) approves user signups, manages multiple camp locations, and each location runs the same placement engine on its own files.
 
 ---
@@ -67,8 +69,10 @@ These defaults can be overridden via `PARKER_EMAIL` and `PARKER_PW` env vars bef
 
 ## Deploy on Render
 
-1. Push this repo to GitHub.
-2. On render.com → **New +** → **Web Service** → connect your repo.
+1. In Render, choose **New +** → **Blueprint** and connect `rjackson-lab/cheercamp-housing`.
+   - You can also use the **Deploy to Render** button at the top of this README.
+   - For this private GitHub repo, make sure the Render GitHub app is installed for `rjackson-lab/cheercamp-housing`.
+2. Render will read the root `render.yaml`.
 3. Configure:
    - **Environment:** Node
    - **Build Command:** `npm install`
@@ -85,6 +89,10 @@ These defaults can be overridden via `PARKER_EMAIL` and `PARKER_PW` env vars bef
    - `DATA_DIR` = `/data`
    - `NODE_ENV` = `production`
 6. Deploy. First boot will seed Parker. Sign in at the Render URL.
+
+If `PARKER_PW` is not set before the first deploy, the app generates a temporary first-login password and prints it in the Render deploy logs. Store that password immediately, then set `PARKER_PW` in Render before future redeploys.
+
+If Render cannot see the repo, open GitHub → **Settings** → **Applications** → **Installed GitHub Apps** → **Render**, then grant access to `rjackson-lab/cheercamp-housing`. The repository is private, so Render must be explicitly authorized.
 
 ---
 
