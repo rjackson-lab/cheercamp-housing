@@ -3,53 +3,65 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dashboard · Cheer Camp Housing</title>
+<title>Admin Dashboard · UCA Camp Housing</title>
 <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-<header class="vs-header">
-  <div class="vs-brand">
-    <span class="vs-brand-mark">UCA</span>
-    <span class="vs-brand-sub">Camp Housing</span>
-  </div>
-  <div class="vs-user-bar">
-    <span id="role-pill" class="vs-pill hidden">Admin</span>
-    <span id="user-name"></span>
-    <a href="#" id="logout" style="color:#fff; opacity:0.85;">Sign out</a>
-  </div>
+<body class="vs-ops-body">
+
+<header class="vs-ops-header">
+  <a class="vs-lockup" href="/">
+    <span class="vs-wordmark">UCA</span>
+    <span class="vs-divider"></span>
+    <span class="vs-product">Admin Dashboard</span>
+  </a>
+  <div style="margin-left: auto;"></div>
+  <div id="vs-profile-mount"></div>
 </header>
 
-<!-- Tab nav (admin only) -->
-<nav id="tab-nav" class="vs-tab-nav hidden">
+<!-- Tab nav -->
+<nav class="vs-tab-nav">
   <div class="vs-tab-nav-inner">
     <button class="vs-tab active" data-tab="locations">Locations</button>
+    <button class="vs-tab" data-tab="sessions">Sessions</button>
     <button class="vs-tab" data-tab="admin">Admin Tools <span id="admin-badge" class="vs-tab-badge hidden">0</span></button>
   </div>
 </nav>
 
 <main class="vs-page">
 
-  <!-- ===== LOCATIONS TAB (always visible for everyone) ===== -->
+  <!-- ===== LOCATIONS TAB ===== -->
   <section id="tab-locations">
 
     <div class="vs-flex-between vs-mb-lg">
       <div>
         <h1 style="margin:0; font-size:22px; color:var(--vs-navy);">Camp Locations</h1>
-        <div class="vs-muted" id="locations-subtitle" style="font-size:13px; margin-top:4px;">Select a location to enter or edit a rooming list</div>
+        <div class="vs-muted" style="font-size:13px; margin-top:4px;">Venues with reusable templates and floor plans. Non-admin users create sessions against these.</div>
       </div>
       <button class="vs-btn vs-btn-gold" id="new-location-btn">+ New Location</button>
     </div>
 
-    <!-- Stat cards summarizing status across locations -->
     <div class="vs-stat-grid" id="stats"></div>
 
-    <!-- For admins: locations grouped by status (Completed / In Process / Errors-or-Not-Started) -->
-    <!-- For users: simple grid -->
     <div id="location-content"></div>
 
   </section>
 
-  <!-- ===== ADMIN TOOLS TAB (admin only) ===== -->
+  <!-- ===== SESSIONS TAB ===== -->
+  <section id="tab-sessions" class="hidden">
+    <div class="vs-flex-between vs-mb-lg">
+      <div>
+        <h1 style="margin:0; font-size:22px; color:var(--vs-navy);">All Sessions</h1>
+        <div class="vs-muted" style="font-size:13px; margin-top:4px;">Every user's placement session across all locations.</div>
+      </div>
+    </div>
+    <div class="vs-panel">
+      <div class="vs-panel-body" id="sessions-body" style="padding:0;">
+        <div style="padding:18px; color:var(--vs-text-mute); font-size:13px;">Loading…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== ADMIN TOOLS TAB ===== -->
   <section id="tab-admin" class="hidden">
 
     <h1 style="margin:0 0 6px; font-size:22px; color:var(--vs-navy);">Admin Tools</h1>
@@ -65,9 +77,7 @@
     </div>
 
     <div class="vs-panel">
-      <div class="vs-panel-header">
-        <span>All Users</span>
-      </div>
+      <div class="vs-panel-header"><span>All Users</span></div>
       <div class="vs-panel-body" id="users-body" style="padding:0;">
         <div style="padding:18px; color:var(--vs-text-mute); font-size:13px;">Loading…</div>
       </div>
@@ -79,25 +89,48 @@
 
 <!-- New location modal -->
 <div id="modal-new-location" class="vs-modal-bg hidden">
-  <div class="vs-modal">
-    <div class="vs-modal-header">New Location</div>
+  <div class="vs-modal" style="max-width: 560px;">
+    <div class="vs-modal-header">New Camp Location</div>
     <div class="vs-modal-body">
+
       <div class="vs-form-row">
-        <label class="vs-label">Location Name</label>
-        <input type="text" class="vs-input" id="new-loc-name" placeholder="e.g. UCF Session 1">
+        <label class="vs-label">Location Name *</label>
+        <input type="text" class="vs-input" id="new-loc-name" placeholder="e.g. University of Central Florida">
       </div>
+
       <div class="vs-form-row">
         <label class="vs-label">Description (optional)</label>
-        <textarea class="vs-textarea" id="new-loc-desc" placeholder="Date range, notes, etc."></textarea>
+        <textarea class="vs-textarea" id="new-loc-desc" rows="2" placeholder="Halls, capacity, special notes…"></textarea>
       </div>
+
+      <div class="vs-form-row">
+        <label class="vs-label">Blank Rooming Template *</label>
+        <div class="vs-input-hint" style="margin-bottom: 6px;">.xlsx workbook with RoomID, Floor, Group/School, Gender columns. Reused by every session at this location.</div>
+        <input type="file" class="vs-input" id="new-loc-blank" accept=".xlsx,.xls">
+      </div>
+
+      <div class="vs-form-row">
+        <label class="vs-label">Reference Template (optional)</label>
+        <div class="vs-input-hint" style="margin-bottom: 6px;">A previously-completed roster used to seed pod layouts. Improves placement accuracy.</div>
+        <input type="file" class="vs-input" id="new-loc-reference" accept=".xlsx,.xls">
+      </div>
+
+      <div class="vs-form-row">
+        <label class="vs-label">Floor Plans (optional, multiple)</label>
+        <div class="vs-input-hint" style="margin-bottom: 6px;">PDFs or images of each floor. Up to 100MB each. Sessions at this location can reference these.</div>
+        <input type="file" class="vs-input" id="new-loc-floorplans" accept=".pdf,.png,.jpg,.jpeg" multiple>
+      </div>
+
+      <div id="new-loc-progress" style="margin-top: 12px;"></div>
     </div>
     <div class="vs-modal-footer">
       <button class="vs-btn vs-btn-secondary" id="new-loc-cancel">Cancel</button>
-      <button class="vs-btn" id="new-loc-create">Create</button>
+      <button class="vs-btn vs-btn-gold" id="new-loc-create">Create Location</button>
     </div>
   </div>
 </div>
 
+<script src="/profile.js"></script>
 <script src="/dashboard.js"></script>
 </body>
 </html>

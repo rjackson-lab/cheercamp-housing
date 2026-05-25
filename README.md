@@ -1,121 +1,69 @@
-# Cheer Camp Housing — Multi-Location Web App
+# UCA Camp Housing — Multi-Location Placement Tool
 
-Multi-user housing placement tool. Parker Jackson (master admin) approves access; team submitters upload rosters; the engine generates placement; Parker reviews and approves the placeholder, then finalizes with real names.
+A multi-tenant Node.js web application for managing UCA cheer camp housing placement across multiple campus venues. Admins curate camp **Locations** (venues with reusable blank templates + reference rosters + floor plans). Non-admin users create **Sessions** against those locations, upload raw rosters, run the placement engine, review compliance, approve placeholders, and finalize with participant names.
 
-## Workflow
+Live: https://cheercamp-housing.onrender.com
 
-1. **Sign up** — request access → Parker approves
-2. **Login** → Locations dashboard
-3. **Create location** (or open one shared with you)
-4. **Upload files**: raw roster (.xlsx), blank template (.xlsx), reference (optional .xlsx), floor plans (.pdf, optional)
-5. **Run Placement Engine** — generates placeholder roster with Gender (M/F) and Role (Athlete/Coach/Chaperone) populated in every row for review
-6. **Review** — bed-by-bed table with searchable filters; click any Gender or Role cell to override before approval
-7. **Approve Placeholder** — locks the assignment, enables finalize
-8. **Finalize with Names** — generates the final .xlsx with real first/last names filled in from the raw roster
-9. **AI Chat** — ask the assistant questions about the placement or describe needed changes (requires `ANTHROPIC_API_KEY`)
+## Architecture
 
-## Default login
+- **Locations** = camp venues, admin-managed. Each has: name, description, blank rooming template (required), reference template (optional), floor plans (multiple PDFs/images, up to 100MB each).
+- **Sessions** = user-owned placement instances. Each session is tied to one location and has its own raw roster, placement output, approval state, and final file.
+- **Placements** = the actual algorithm runs. Each session can have multiple placement runs (re-runs preserve history).
 
-- Email: `pjackson@varsity.com`
-- Password: `Varsity2026`
+## User roles & views
 
-(Override via `PARKER_EMAIL` / `PARKER_PW` before first boot.)
+- **Admin** lands on `dashboard.html`:
+  - **Locations tab** — grid of venues with template/floor plan status, "+ New Location" modal that captures name + blank template + reference template (optional) + multiple floor plans in one flow
+  - **Sessions tab** — every user's sessions across all venues with status pills and direct links
+  - **Admin Tools tab** — user approvals and role management
+  - **Location detail** at `/location/:id` for editing venue + managing files
+- **Non-admin** lands on `operations.html`:
+  - Six-step nav (Upload → Analyze → Placeholder Build → Approval → Finalize → Export)
+  - Step 1: pick a venue (only admin-curated venues with a blank template appear)
+  - Step 2: upload raw roster (auto-creates a session)
+  - Step 3: review with stats, compliance grid, hall breakdown, bed-by-bed editable table
+  - Step 4: approve placeholder (locks edits) → finalize with names → download final
+  - Resume panel at top for in-progress sessions; `/session/:id` deep-links
 
-## Required environment variables
+Every authenticated page has a profile dropdown (header avatar → Profile settings, Change password, Sign out) for editing name, email, and password.
 
-| Variable | Purpose |
-|---|---|
-| `PORT` | Render auto-sets; defaults to 3000 |
-| `SESSION_SECRET` | **Required in production.** Random 32+ char string for cookie signing |
-| `DATA_DIR` | Where SQLite DB lives. Use `/data` on Render (with attached disk) |
-| `NODE_ENV` | Set to `production` to enable secure cookies |
-| `APP_URL` | Public URL of your deployment (used in email links). E.g. `https://cheercamp-housing.onrender.com` |
-| `PARKER_EMAIL` | Master admin email (first boot only) |
-| `PARKER_PW` | Master admin password (first boot only) |
+## Two-stage approval workflow
 
-## Optional environment variables (for full feature set)
+1. Run placement → generates placeholder.xlsx + placement DB record with `is_approved=0`
+2. Review the bed-by-bed table with editable Gender/Role dropdowns
+3. Click **Approve Placeholder** → `is_approved=1`, edits locked
+4. After approval, **Finalize with Names** appears → writes First/Last names into approved placeholder → download final
+5. Admin can unapprove to unlock for re-editing if needed
 
-| Variable | Purpose |
-|---|---|
-| `ANTHROPIC_API_KEY` | Enables AI chat. Get one at console.anthropic.com |
-| `ANTHROPIC_MODEL` | Override default model (`claude-sonnet-4-20250514`) |
-| `RESEND_API_KEY` | Enables outbound email. Sign up at resend.com (3,000 free emails/mo). Without this, all emails log to the server console |
-| `MAIL_FROM` | From address. Default: `Cheer Camp Housing <onboarding@resend.dev>` (Resend's test sender). For production, verify your own domain in Resend and use `Housing <housing@yourdomain.com>` |
+## API summary
 
-## Email notifications
+Auth/profile: `POST /api/signup`, `/login`, `/logout`, `GET /api/me`, `PATCH /api/profile`, `POST /api/password/change`, `POST /api/password/reset/request`, `POST /api/password/reset/confirm`
 
-When configured (`RESEND_API_KEY` set), the system sends:
-- **New signup → all admins** with approve/reject link
-- **Account approved → the user** with sign-in link
-- **Password reset → the user** with a 1-hour reset link
+Admin: `GET /api/admin/users`, `POST /api/admin/users/:id/approve`, `/reject`, `/role`
 
-Without `RESEND_API_KEY`, emails print to the server console (visible in Render logs) — useful for development, but real users won't get them.
+Locations (admin-only writes, all-auth reads): `GET /api/locations`, `POST /api/locations` *(admin)*, `GET /api/locations/:id`, `PATCH /api/locations/:id` *(admin)*, `DELETE /api/locations/:id` *(admin)*, `POST /api/locations/:id/files` *(admin; kind=blank|reference|floorplan)*
 
-## Per-location access
+Sessions (user-owned): `GET /api/sessions`, `POST /api/sessions`, `GET /api/sessions/:id`, `PATCH /api/sessions/:id`, `DELETE /api/sessions/:id`, `POST /api/sessions/:id/raw`, `POST /api/sessions/:id/run`, `GET /api/sessions/:id/placement`, `GET/POST /api/sessions/:id/chat`
 
-- **Admins** see all locations
-- **Regular users** see only locations they created OR were granted access to
-- Grant access from the location page → Shared Access panel → enter approved user's email
+Placements: `POST /api/placements/:id/approve`, `/unapprove` *(admin)*, `/finalize`, `/apply-changes`, `PATCH /api/placements/:id/assignments/:idx`
 
-## Deployment on Render
+Files: `GET /api/files/:id`, `DELETE /api/files/:id`
 
-Render auto-reads `render.yaml`. Steps:
+## Deployment
 
-1. Push to GitHub
-2. render.com → New + → Web Service → connect repo
-3. Set sensitive env vars in the dashboard:
-   - `SESSION_SECRET` (click Generate)
-   - `PARKER_EMAIL`, `PARKER_PW` (your choice)
-   - `APP_URL` (your render URL, e.g. `https://cheercamp-housing.onrender.com`)
-   - `ANTHROPIC_API_KEY` (optional, for AI chat)
-   - `RESEND_API_KEY` + `MAIL_FROM` (optional, for emails)
-4. Plan: **Starter** ($7/mo) — required for the persistent disk that keeps your DB alive across restarts
-5. Deploy
+Render Starter plan with a `/data` persistent disk. `render.yaml` is in the repo.
 
-## Local development
+**Environment variables:**
+- `PORT`, `SESSION_SECRET`, `DATA_DIR=/data`, `NODE_ENV=production`, `APP_URL=https://your-domain`
+- *First boot only:* `PARKER_EMAIL`, `PARKER_PW` (seeds the initial admin)
+- *Optional:* `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL=claude-sonnet-4-20250514` for AI chat, `RESEND_API_KEY` + `MAIL_FROM` for emails
 
-```bash
-npm install
-PARKER_EMAIL=test@local PARKER_PW=Varsity2026 node server.js
-# visit http://localhost:3000
-```
+Default admin (first boot, override with env vars): **pjackson@varsity.com / Varsity2026**
 
-## Files
+## File upload limits
 
-```
-server.js               # Express app — all routes
-package.json
-render.yaml             # Render deploy config
-lib/
-  db.js                 # SQLite schema + Parker bootstrap
-  placement.js          # Engine entry: runPlacement, finalizeWithNames
-  _placement_core.js    # Ported placement algorithm
-  mail.js               # Email helper (Resend)
-  ai.js                 # AI chat helper (Anthropic)
-public/
-  styles.css            # UCA brand (Montserrat + navy/gold)
-  gate.html             # Login + signup + forgot password
-  dashboard.html        # Unified locations dashboard (admin + user)
-  dashboard.js
-  location.html         # Per-location workspace
-  location.js
-  reset.html            # Password reset confirmation
-data/                   # Created at runtime — SQLite DB + uploaded files
-```
+100MB per file (covers large floor-plan PDFs and images). Adjust the `multer` config in `server.js` if needed.
 
-## Status / approval state model
+## Tech stack
 
-| Location status | Meaning |
-|---|---|
-| `not_started` | No placement runs yet |
-| `in_process` | Placement run but has advisory issues (team splits, mixed-gender floors) |
-| `errors` | Placement run with blocker violations or fewer than expected beds placed |
-| `completed` | Finalized roster generated |
-
-| Placement state | UI |
-|---|---|
-| Run, not approved | "Approve Placeholder" button enabled (or disabled if blockers) |
-| Approved | "Approved [date]" stamp; "Finalize with Names" button appears |
-| Finalized | Download Final Roster button |
-
-Admin can **unapprove** to unlock for further edits.
+Express · express-session · better-sqlite3 (WAL) · bcryptjs · multer · SheetJS (xlsx) · JSZip · connect-sqlite3 · Anthropic API · Resend

@@ -1,7 +1,7 @@
-const $ = (id) => document.getElementById(id);
-let currentUser = null;
+// Admin dashboard: manage venues (Locations), view all sessions, approve users.
 
-function fmtDate(ts) { return ts ? new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'; }
+const $ = (id) => document.getElementById(id);
+function fmtDate(ts) { return ts ? new Date(ts).toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' }) : '—'; }
 function escape(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 async function api(p, o) {
   const r = await fetch(p, o);
@@ -9,206 +9,243 @@ async function api(p, o) {
   return r;
 }
 
-async function loadMe() {
+let me = null;
+
+async function bootstrap() {
   const r = await api('/api/me'); if (!r) return;
-  const data = await r.json();
-  currentUser = data.user;
-  $('user-name').textContent = currentUser.name;
-  if (currentUser.role === 'admin') {
-    $('role-pill').classList.remove('hidden');
-    $('tab-nav').classList.remove('hidden');
-    $('locations-subtitle').textContent = 'All locations across the organization, grouped by status';
-  }
+  me = (await r.json()).user;
+  if (me.role !== 'admin') { window.location.href = '/'; return; }
+  ProfileDropdown.mount($('vs-profile-mount'), me);
+
+  document.querySelectorAll('.vs-tab').forEach(btn => { btn.onclick = () => switchTab(btn.dataset.tab); });
+
+  await Promise.all([loadLocations(), loadSessions(), loadAdminPanel()]);
 }
 
-// ===== Tabs =====
-document.querySelectorAll('.vs-tab').forEach(btn => {
-  btn.onclick = () => {
-    document.querySelectorAll('.vs-tab').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelectorAll('section[id^="tab-"]').forEach(s => s.classList.add('hidden'));
-    $(`tab-${btn.dataset.tab}`).classList.remove('hidden');
-  };
-});
+function switchTab(name) {
+  document.querySelectorAll('.vs-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  $('tab-locations').classList.toggle('hidden', name !== 'locations');
+  $('tab-sessions').classList.toggle('hidden', name !== 'sessions');
+  $('tab-admin').classList.toggle('hidden', name !== 'admin');
+}
 
-// ===== Locations =====
 async function loadLocations() {
-  const r = await api('/api/locations');
+  const r = await api('/api/locations'); if (!r) return;
   const { locations } = await r.json();
 
-  const groups = { completed: [], in_process: [], errors: [], not_started: [] };
-  for (const l of locations) (groups[l.status] || groups.not_started).push(l);
-
+  const counts = { ready: 0, empty: 0 };
+  for (const l of locations) {
+    if (l.has_blank) counts.ready++; else counts.empty++;
+  }
   $('stats').innerHTML = `
     <div class="vs-stat"><div class="vs-stat-label">Locations</div><div class="vs-stat-value">${locations.length}</div></div>
-    <div class="vs-stat"><div class="vs-stat-label">Completed</div><div class="vs-stat-value" style="color:var(--vs-success)">${groups.completed.length}</div></div>
-    <div class="vs-stat"><div class="vs-stat-label">In Process</div><div class="vs-stat-value" style="color:var(--vs-warn)">${groups.in_process.length}</div></div>
-    <div class="vs-stat"><div class="vs-stat-label">Errors / Not Started</div><div class="vs-stat-value" style="color:var(--vs-error)">${groups.errors.length + groups.not_started.length}</div></div>
+    <div class="vs-stat"><div class="vs-stat-label">Ready for Sessions</div><div class="vs-stat-value" style="color:#2E7D32">${counts.ready}</div></div>
+    <div class="vs-stat"><div class="vs-stat-label">Missing Template</div><div class="vs-stat-value" style="color:#B47A0B">${counts.empty}</div></div>
+    <div class="vs-stat"><div class="vs-stat-label">Total Sessions</div><div class="vs-stat-value">${locations.reduce((s,l)=>s+(l.session_count||0),0)}</div></div>
   `;
 
-  const content = $('location-content');
   if (locations.length === 0) {
-    content.innerHTML = `
-      <div class="vs-panel"><div class="vs-panel-body" style="text-align:center; padding:48px 20px;">
-        <div style="font-size:18px; font-weight:700; color:var(--vs-navy); margin-bottom:8px;">No locations yet</div>
-        <div class="vs-muted" style="margin-bottom:18px;">Create your first camp location to get started</div>
-        <button class="vs-btn" onclick="document.getElementById('new-location-btn').click()">+ Create Location</button>
-      </div></div>
+    $('location-content').innerHTML = `
+      <div class="vs-panel">
+        <div class="vs-panel-body" style="text-align:center; padding: 40px;">
+          <h2 style="margin:0 0 6px; color:var(--vs-navy);">No locations yet</h2>
+          <div class="vs-muted" style="margin-bottom: 16px;">Create your first camp location to get started</div>
+          <button class="vs-btn vs-btn-gold" id="empty-create">+ Create Location</button>
+        </div>
+      </div>
     `;
-    return;
-  }
-
-  if (currentUser.role === 'admin') {
-    // Admin sees grouped status panels for oversight
-    content.innerHTML = `
-      ${renderGroup('Completed', 'completed', groups.completed)}
-      ${renderGroup('In Process', 'in_process', groups.in_process)}
-      ${renderGroup('Errors / Not Completed', 'errors', [...groups.errors, ...groups.not_started])}
-    `;
+    $('empty-create').onclick = openNewLocationModal;
   } else {
-    // Users see a single flat grid
-    content.innerHTML = `<div class="vs-card-grid">${locations.map(locCard).join('')}</div>`;
-  }
-  document.querySelectorAll('.vs-card').forEach(c => c.onclick = () => window.location.href = `/location/${c.dataset.id}`);
-}
-
-function renderGroup(title, cls, list) {
-  return `
-    <div class="vs-panel">
-      <div class="vs-panel-header">
-        <span>${title} <span class="vs-status ${cls}" style="margin-left:8px;">${list.length}</span></span>
+    $('location-content').innerHTML = `
+      <div class="vs-card-grid">
+        ${locations.map(l => `
+          <div class="vs-card" data-loc-id="${l.id}">
+            <div class="vs-card-title">${escape(l.name)}</div>
+            ${l.description ? `<div class="vs-muted vs-card-meta">${escape(l.description)}</div>` : ''}
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin: 10px 0;">
+              <span class="vs-pill ${l.has_blank ? 'ok' : 'danger'}"><span class="dot"></span>${l.has_blank ? 'Template ready' : 'No template'}</span>
+              ${l.has_reference ? '<span class="vs-pill"><span class="dot"></span>Reference</span>' : ''}
+              <span class="vs-pill"><span class="dot"></span>${l.floorplan_count || 0} floor plans</span>
+              <span class="vs-pill"><span class="dot"></span>${l.session_count || 0} session${l.session_count === 1 ? '' : 's'}</span>
+            </div>
+            <div class="vs-card-footer">
+              <span class="vs-muted" style="font-size:11px;">Created ${fmtDate(l.created_at)}</span>
+              <a class="vs-btn vs-btn-sm vs-btn-secondary" href="/location/${l.id}">Manage</a>
+            </div>
+          </div>
+        `).join('')}
       </div>
-      <div class="vs-panel-body">
-        ${list.length === 0
-          ? `<div class="vs-muted" style="font-size:13px;">None.</div>`
-          : `<div class="vs-card-grid">${list.map(locCard).join('')}</div>`}
-      </div>
-    </div>
-  `;
-}
-
-function locCard(l) {
-  const filesReady = [];
-  if (l.has_raw) filesReady.push('Raw');
-  if (l.has_blank) filesReady.push('Blank');
-  if (l.has_reference) filesReady.push('Reference');
-  if (l.floorplan_count) filesReady.push(`${l.floorplan_count} Floor Plans`);
-  return `
-    <div class="vs-card" data-id="${l.id}">
-      <div class="vs-card-title">${escape(l.name)}</div>
-      <div class="vs-card-meta">Created by ${escape(l.created_by_name || '—')} · ${fmtDate(l.created_at)}</div>
-      ${l.description ? `<div style="font-size:12px; color:var(--vs-text-mute); margin-bottom:10px;">${escape(l.description)}</div>` : ''}
-      <div style="font-size:11px; color:var(--vs-text-mute); margin-bottom:10px;">
-        ${filesReady.length ? filesReady.join(' · ') : '<em>No files yet</em>'}
-      </div>
-      <div class="vs-card-footer">
-        <span class="vs-status ${l.status}">${l.status.replace('_',' ')}</span>
-        <span style="font-size:11px; color:var(--vs-text-mute);">${l.last_run ? 'Last run ' + fmtDate(l.last_run) : 'Not yet run'}</span>
-      </div>
-    </div>
-  `;
-}
-
-// ===== Admin: pending + users =====
-async function loadAdmin() {
-  if (currentUser.role !== 'admin') return;
-  const r = await api('/api/admin/users');
-  const { users } = await r.json();
-  const pending = users.filter(u => u.status === 'pending');
-  const others = users.filter(u => u.status !== 'pending');
-
-  // Pending count badge in tab
-  $('pending-count').textContent = pending.length;
-  const badge = $('admin-badge');
-  if (pending.length > 0) { badge.textContent = pending.length; badge.classList.remove('hidden'); }
-  else { badge.classList.add('hidden'); }
-
-  // Pending body
-  const pBody = $('pending-body');
-  if (pending.length === 0) {
-    pBody.innerHTML = '<div style="padding:18px; color:var(--vs-text-mute); font-size:13px;">No access requests waiting.</div>';
-  } else {
-    pBody.innerHTML = `
-      <div class="vs-table-scroll"><table class="vs-table vs-table-stack">
-        <thead><tr><th>Name</th><th>Email</th><th>Requested</th><th class="vs-actions"></th></tr></thead>
-        <tbody>${pending.map(u => `
-          <tr>
-            <td><strong>${escape(u.name)}</strong></td>
-            <td>${escape(u.email)}</td>
-            <td>${fmtDate(u.created_at)}</td>
-            <td class="vs-actions">
-              <button class="vs-btn vs-btn-sm vs-btn-secondary" data-act="reject" data-id="${u.id}">Reject</button>
-              <button class="vs-btn vs-btn-sm vs-btn-gold" data-act="approve" data-id="${u.id}">Approve</button>
-            </td>
-          </tr>`).join('')}</tbody>
-      </table></div>
     `;
-    pBody.querySelectorAll('button[data-act]').forEach(b => {
-      b.onclick = async () => {
-        await api(`/api/admin/users/${b.dataset.id}/${b.dataset.act}`, { method: 'POST' });
-        loadAdmin();
-      };
-    });
-  }
-
-  // Users body
-  const uBody = $('users-body');
-  if (others.length === 0) {
-    uBody.innerHTML = '<div style="padding:18px; color:var(--vs-text-mute); font-size:13px;">No approved users.</div>';
-  } else {
-    uBody.innerHTML = `
-      <div class="vs-table-scroll"><table class="vs-table">
-        <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Role</th><th>Approved</th><th class="vs-actions"></th></tr></thead>
-        <tbody>${others.map(u => `
-          <tr>
-            <td><strong>${escape(u.name)}</strong></td>
-            <td>${escape(u.email)}</td>
-            <td><span class="vs-status ${u.status}">${u.status}</span></td>
-            <td><span class="vs-status ${u.role === 'admin' ? 'admin' : ''}">${u.role}</span></td>
-            <td>${fmtDate(u.approved_at)}</td>
-            <td class="vs-actions">
-              ${u.role !== 'admin' ? `<button class="vs-btn vs-btn-sm vs-btn-secondary" data-promote="${u.id}">Make admin</button>` : ''}
-            </td>
-          </tr>`).join('')}</tbody>
-      </table></div>
-    `;
-    uBody.querySelectorAll('button[data-promote]').forEach(b => {
-      b.onclick = async () => {
-        if (!confirm('Promote this user to admin?')) return;
-        await api(`/api/admin/users/${b.dataset.promote}/role`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'admin' })
-        });
-        loadAdmin();
-      };
-    });
   }
 }
 
-// ===== New location modal =====
-$('new-location-btn').onclick = () => $('modal-new-location').classList.remove('hidden');
+function openNewLocationModal() {
+  $('new-loc-name').value = '';
+  $('new-loc-desc').value = '';
+  $('new-loc-blank').value = '';
+  $('new-loc-reference').value = '';
+  $('new-loc-floorplans').value = '';
+  $('new-loc-progress').innerHTML = '';
+  $('modal-new-location').classList.remove('hidden');
+  setTimeout(() => $('new-loc-name').focus(), 0);
+}
+
+$('new-location-btn').onclick = openNewLocationModal;
 $('new-loc-cancel').onclick = () => $('modal-new-location').classList.add('hidden');
-$('new-loc-create').onclick = async () => {
+$('new-loc-create').onclick = createLocation;
+
+async function uploadFile(locId, kind, file) {
+  const fd = new FormData();
+  fd.append('kind', kind);
+  fd.append('file', file);
+  return api(`/api/locations/${locId}/files`, { method: 'POST', body: fd });
+}
+
+async function createLocation() {
   const name = $('new-loc-name').value.trim();
   const description = $('new-loc-desc').value.trim();
-  if (!name) { alert('Name required'); return; }
+  const blankFile = $('new-loc-blank').files[0];
+  const refFile = $('new-loc-reference').files[0];
+  const floorPlanFiles = Array.from($('new-loc-floorplans').files || []);
+
+  if (!name) { $('new-loc-progress').innerHTML = '<div class="vs-alert error">Name is required</div>'; return; }
+  if (!blankFile) { $('new-loc-progress').innerHTML = '<div class="vs-alert error">Blank rooming template is required</div>'; return; }
+
+  $('new-loc-create').disabled = true;
+  $('new-loc-progress').innerHTML = '<div class="vs-alert info"><span class="vs-spinner"></span>Creating location…</div>';
+
   const r = await api('/api/locations', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, description })
   });
-  const data = await r.json();
-  if (r.ok) window.location.href = `/location/${data.id}`;
-  else alert(data.error || 'Failed');
-};
+  if (!r) return;
+  const d = await r.json();
+  if (!r.ok) { $('new-loc-progress').innerHTML = `<div class="vs-alert error">${escape(d.error || 'failed')}</div>`; $('new-loc-create').disabled = false; return; }
+  const locId = d.id;
 
-$('logout').onclick = async (e) => {
-  e.preventDefault();
-  await api('/api/logout', { method: 'POST' });
-  window.location.href = '/';
-};
+  const steps = [
+    { kind: 'blank', file: blankFile, label: 'blank template' },
+    ...(refFile ? [{ kind: 'reference', file: refFile, label: 'reference template' }] : []),
+    ...floorPlanFiles.map((f, i) => ({ kind: 'floorplan', file: f, label: `floor plan ${i+1}/${floorPlanFiles.length}` })),
+  ];
 
-(async () => {
-  await loadMe();
-  await loadLocations();
-  await loadAdmin();
-})();
+  for (const step of steps) {
+    $('new-loc-progress').innerHTML = `<div class="vs-alert info"><span class="vs-spinner"></span>Uploading ${escape(step.label)} (${(step.file.size/1024/1024).toFixed(1)} MB)…</div>`;
+    const ur = await uploadFile(locId, step.kind, step.file);
+    if (!ur || !ur.ok) {
+      const ud = ur ? await ur.json() : { error: 'upload failed' };
+      $('new-loc-progress').innerHTML = `<div class="vs-alert error">Failed to upload ${escape(step.label)}: ${escape(ud.error || 'unknown')}. The location was created — upload remaining files from its detail page.</div>`;
+      $('new-loc-create').disabled = false;
+      return;
+    }
+  }
+
+  $('new-loc-progress').innerHTML = '<div class="vs-alert success">✓ Location created with all files</div>';
+  setTimeout(() => {
+    $('modal-new-location').classList.add('hidden');
+    $('new-loc-create').disabled = false;
+    loadLocations();
+  }, 700);
+}
+
+async function loadSessions() {
+  const r = await api('/api/sessions'); if (!r) return;
+  const { sessions } = await r.json();
+  if ((sessions || []).length === 0) {
+    $('sessions-body').innerHTML = '<div style="padding:18px; color:var(--vs-text-mute); font-size:13px;">No sessions yet. Non-admin users will create sessions against your locations.</div>';
+    return;
+  }
+  $('sessions-body').innerHTML = `
+    <div class="vs-table-scroll">
+      <table class="vs-table zebra">
+        <thead><tr><th>Session</th><th>Location</th><th>Created By</th><th>Status</th><th>Last Run</th><th>Updated</th><th></th></tr></thead>
+        <tbody>
+          ${sessions.map(s => `
+            <tr>
+              <td><b>${escape(s.name || 'Untitled')}</b></td>
+              <td>${escape(s.location_name || '—')}</td>
+              <td>${escape(s.created_by_name || '—')}</td>
+              <td>${renderSessionStatus(s)}</td>
+              <td class="vs-muted">${s.last_run ? fmtDate(s.last_run) : '—'}</td>
+              <td class="vs-muted">${fmtDate(s.updated_at)}</td>
+              <td style="text-align:right;">
+                <a class="vs-btn vs-btn-sm vs-btn-secondary" href="/session/${s.id}">View</a>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderSessionStatus(s) {
+  if (s.latest_finalized_at) return '<span class="vs-pill ok"><span class="dot"></span>Finalized</span>';
+  if (s.latest_is_approved) return '<span class="vs-pill warn"><span class="dot"></span>Approved</span>';
+  if (s.last_run) return '<span class="vs-pill"><span class="dot"></span>Draft</span>';
+  return '<span class="vs-pill"><span class="dot"></span>Not started</span>';
+}
+
+async function loadAdminPanel() {
+  const r = await api('/api/admin/users'); if (!r) return;
+  const { users } = await r.json();
+
+  const pending = users.filter(u => u.status === 'pending');
+  $('pending-count').textContent = pending.length;
+  $('admin-badge').textContent = pending.length;
+  $('admin-badge').classList.toggle('hidden', pending.length === 0);
+
+  $('pending-body').innerHTML = pending.length === 0 ?
+    '<div style="padding:18px; color:var(--vs-text-mute); font-size:13px;">No pending requests</div>' : `
+    <table class="vs-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Requested</th><th></th></tr></thead>
+      <tbody>${pending.map(u => `
+        <tr>
+          <td>${escape(u.name)}</td>
+          <td>${escape(u.email)}</td>
+          <td class="vs-muted">${fmtDate(u.created_at)}</td>
+          <td style="text-align:right;">
+            <button class="vs-btn vs-btn-sm vs-btn-gold" data-approve="${u.id}">Approve</button>
+            <button class="vs-btn vs-btn-sm vs-btn-danger" data-reject="${u.id}">Reject</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+
+  $('users-body').innerHTML = `
+    <table class="vs-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Role</th><th></th></tr></thead>
+      <tbody>${users.map(u => `
+        <tr>
+          <td>${escape(u.name)}</td>
+          <td>${escape(u.email)}</td>
+          <td><span class="vs-status ${u.status}">${u.status}</span></td>
+          <td>${u.role === 'admin' ? '<span class="vs-status admin">admin</span>' : 'user'}</td>
+          <td style="text-align:right;">
+            ${u.status === 'approved' && u.id !== me.id ?
+              `<button class="vs-btn vs-btn-sm vs-btn-secondary" data-role="${u.id}" data-newrole="${u.role === 'admin' ? 'user' : 'admin'}">Make ${u.role === 'admin' ? 'user' : 'admin'}</button>` : ''}
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+
+  document.querySelectorAll('button[data-approve]').forEach(b => {
+    b.onclick = async () => { await api(`/api/admin/users/${b.dataset.approve}/approve`, { method: 'POST' }); loadAdminPanel(); };
+  });
+  document.querySelectorAll('button[data-reject]').forEach(b => {
+    b.onclick = async () => { if (!confirm('Reject this user?')) return; await api(`/api/admin/users/${b.dataset.reject}/reject`, { method: 'POST' }); loadAdminPanel(); };
+  });
+  document.querySelectorAll('button[data-role]').forEach(b => {
+    b.onclick = async () => {
+      await api(`/api/admin/users/${b.dataset.role}/role`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: b.dataset.newrole })
+      });
+      loadAdminPanel();
+    };
+  });
+}
+
+bootstrap();

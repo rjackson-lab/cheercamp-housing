@@ -57,10 +57,7 @@ function requireAdmin(req, res, next) {
   next();
 }
 function canAccessLocation(req, loc) {
-  if (req.session.role === 'admin' || loc.created_by === req.session.userId) return true;
-  const member = db.prepare('SELECT 1 FROM location_members WHERE location_id=? AND user_id=?')
-    .get(loc.id, req.session.userId);
-  return !!member;
+  return !!req.session.userId && !!loc;
 }
 function getAccessibleLocation(req, id) {
   const loc = db.prepare('SELECT * FROM locations WHERE id=?').get(id);
@@ -72,11 +69,30 @@ function getAccessibleFile(req, id) {
     SELECT f.*
     FROM location_files f
     JOIN locations l ON l.id = f.location_id
+    LEFT JOIN sessions s ON s.id=f.session_id
     WHERE f.id=?
-      AND (?='admin' OR l.created_by=? OR EXISTS (
-        SELECT 1 FROM location_members lm WHERE lm.location_id=l.id AND lm.user_id=?
-      ))
-  `).get(id, req.session.role, req.session.userId, req.session.userId);
+      AND (?='admin' OR f.session_id IS NULL OR s.created_by=?)
+  `).get(id, req.session.role, req.session.userId);
+}
+function getAccessibleSession(req, id) {
+  const sessionRow = db.prepare(`
+    SELECT s.*, l.name AS location_name, l.description AS location_description
+    FROM sessions s
+    JOIN locations l ON l.id=s.location_id
+    WHERE s.id=?
+  `).get(id);
+  if (!sessionRow) return null;
+  if (req.session.role === 'admin' || sessionRow.created_by === req.session.userId) return sessionRow;
+  return null;
+}
+function canManagePlacement(req, placement) {
+  if (req.session.role === 'admin') return true;
+  if (placement.session_id) {
+    const s = db.prepare('SELECT created_by FROM sessions WHERE id=?').get(placement.session_id);
+    return !!s && s.created_by === req.session.userId;
+  }
+  const loc = db.prepare('SELECT created_by FROM locations WHERE id=?').get(placement.location_id);
+  return !!loc && loc.created_by === req.session.userId;
 }
 
 // ---------- auth ----------
@@ -142,6 +158,28 @@ app.post('/api/password/reset/confirm', (req, res) => {
   res.json({ ok: true });
 });
 
+app.patch('/api/profile', requireAuth, (req, res) => {
+  const name = String((req.body || {}).name || '').trim();
+  const email = String((req.body || {}).email || '').toLowerCase().trim();
+  if (!name || !email) return res.status(400).json({ error: 'name and email required' });
+  const existing = db.prepare('SELECT id FROM users WHERE email=? AND id<>?').get(email, req.session.userId);
+  if (existing) return res.status(409).json({ error: 'email already in use' });
+  db.prepare('UPDATE users SET name=?, email=? WHERE id=?').run(name, email, req.session.userId);
+  req.session.name = name;
+  const user = db.prepare('SELECT id, name, email, role, status FROM users WHERE id=?').get(req.session.userId);
+  res.json({ ok: true, user });
+});
+
+app.post('/api/password/change', requireAuth, (req, res) => {
+  const currentPassword = String((req.body || {}).currentPassword || '');
+  const newPassword = String((req.body || {}).newPassword || '');
+  if (newPassword.length < 8) return res.status(400).json({ error: 'new password must be 8+ characters' });
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.session.userId);
+  if (!u || !bcrypt.compareSync(currentPassword, u.password_hash)) return res.status(401).json({ error: 'current password is incorrect' });
+  db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(newPassword, 10), req.session.userId);
+  res.json({ ok: true });
+});
+
 app.get('/api/me', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'unauthorized' });
   const u = db.prepare('SELECT id, name, email, role, status FROM users WHERE id=?').get(req.session.userId);
@@ -182,23 +220,20 @@ app.post('/api/admin/users/:id/role', requireAdmin, (req, res) => {
 app.get('/api/locations', requireAuth, (req, res) => {
   const sql = `
     SELECT l.*, u.name AS created_by_name,
-      (SELECT COUNT(*) FROM location_files WHERE location_id=l.id AND kind='raw') AS has_raw,
       (SELECT COUNT(*) FROM location_files WHERE location_id=l.id AND kind='blank') AS has_blank,
       (SELECT COUNT(*) FROM location_files WHERE location_id=l.id AND kind='reference') AS has_reference,
       (SELECT COUNT(*) FROM location_files WHERE location_id=l.id AND kind='floorplan') AS floorplan_count,
+      (SELECT COUNT(*) FROM sessions WHERE location_id=l.id) AS session_count,
       (SELECT MAX(run_at) FROM placements WHERE location_id=l.id) AS last_run
     FROM locations l
     LEFT JOIN users u ON u.id = l.created_by
-    WHERE (?='admin' OR l.created_by=? OR EXISTS (
-      SELECT 1 FROM location_members lm WHERE lm.location_id=l.id AND lm.user_id=?
-    ))
     ORDER BY l.updated_at DESC
   `;
-  const rows = db.prepare(sql).all(req.session.role, req.session.userId, req.session.userId);
+  const rows = db.prepare(sql).all();
   res.json({ locations: rows });
 });
 
-app.post('/api/locations', requireAuth, (req, res) => {
+app.post('/api/locations', requireAdmin, (req, res) => {
   const { name, description } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name required' });
   const t = Date.now();
@@ -207,6 +242,16 @@ app.post('/api/locations', requireAuth, (req, res) => {
     VALUES (?, ?, 'not_started', ?, ?, ?)
   `).run(String(name).trim(), String(description || '').trim(), req.session.userId, t, t);
   res.json({ ok: true, id: info.lastInsertRowid });
+});
+
+app.patch('/api/locations/:id', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id);
+  const { name, description } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const info = db.prepare('UPDATE locations SET name=?, description=?, updated_at=? WHERE id=?')
+    .run(String(name).trim(), String(description || '').trim(), Date.now(), id);
+  if (!info.changes) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true });
 });
 
 app.get('/api/locations/:id', requireAuth, (req, res) => {
@@ -259,12 +304,12 @@ app.delete('/api/locations/:id', requireAdmin, (req, res) => {
 });
 
 // ---------- files ----------
-app.post('/api/locations/:id/files', requireAuth, upload.single('file'), (req, res) => {
+app.post('/api/locations/:id/files', requireAdmin, upload.single('file'), (req, res) => {
   const id = parseInt(req.params.id);
   const loc = getAccessibleLocation(req, id);
   if (!loc) return res.status(404).json({ error: 'not found' });
   const kind = req.body.kind;
-  if (!['raw', 'blank', 'reference', 'floorplan'].includes(kind))
+  if (!['blank', 'reference', 'floorplan'].includes(kind))
     return res.status(400).json({ error: 'invalid kind' });
   if (!req.file) return res.status(400).json({ error: 'no file' });
 
@@ -291,7 +336,76 @@ app.get('/api/files/:id', requireAuth, (req, res) => {
 app.delete('/api/files/:id', requireAuth, (req, res) => {
   const f = getAccessibleFile(req, parseInt(req.params.id));
   if (!f) return res.status(404).end();
+  if (f.session_id && req.session.role !== 'admin') {
+    const s = getAccessibleSession(req, f.session_id);
+    if (!s || s.created_by !== req.session.userId) return res.status(403).json({ error: 'owner or admin only' });
+  }
+  if (!f.session_id && req.session.role !== 'admin') return res.status(403).json({ error: 'admin only' });
   db.prepare('DELETE FROM location_files WHERE id=?').run(f.id);
+  res.json({ ok: true });
+});
+
+// ---------- sessions ----------
+app.get('/api/sessions', requireAuth, (req, res) => {
+  const sessions = db.prepare(`
+    SELECT s.*, l.name AS location_name, u.name AS created_by_name,
+      (SELECT MAX(run_at) FROM placements WHERE session_id=s.id) AS last_run,
+      (SELECT is_approved FROM placements WHERE session_id=s.id ORDER BY run_at DESC LIMIT 1) AS latest_is_approved,
+      (SELECT finalized_at FROM placements WHERE session_id=s.id ORDER BY run_at DESC LIMIT 1) AS latest_finalized_at
+    FROM sessions s
+    JOIN locations l ON l.id=s.location_id
+    JOIN users u ON u.id=s.created_by
+    WHERE (?='admin' OR s.created_by=?)
+    ORDER BY s.updated_at DESC
+  `).all(req.session.role, req.session.userId);
+  res.json({ sessions });
+});
+
+app.post('/api/sessions', requireAuth, (req, res) => {
+  const locationId = parseInt((req.body || {}).location_id);
+  const name = String((req.body || {}).name || '').trim();
+  const loc = db.prepare('SELECT * FROM locations WHERE id=?').get(locationId);
+  if (!loc) return res.status(404).json({ error: 'location not found' });
+  const t = Date.now();
+  const info = db.prepare(`
+    INSERT INTO sessions (name, location_id, created_by, created_at, updated_at, status)
+    VALUES (?, ?, ?, ?, ?, 'not_started')
+  `).run(name || null, locationId, req.session.userId, t, t);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
+app.get('/api/sessions/:id', requireAuth, (req, res) => {
+  const sessionRow = getAccessibleSession(req, parseInt(req.params.id));
+  if (!sessionRow) return res.status(404).json({ error: 'not found' });
+  const sessionFiles = db.prepare(`
+    SELECT id, kind, filename, mime_type, size_bytes, uploaded_at FROM location_files
+    WHERE session_id=? ORDER BY uploaded_at DESC
+  `).all(sessionRow.id);
+  const venueFiles = db.prepare(`
+    SELECT id, kind, filename, mime_type, size_bytes, uploaded_at FROM location_files
+    WHERE location_id=? AND session_id IS NULL ORDER BY kind, uploaded_at DESC
+  `).all(sessionRow.location_id);
+  res.json({ session: sessionRow, sessionFiles, venueFiles });
+});
+
+app.delete('/api/sessions/:id', requireAuth, (req, res) => {
+  const sessionRow = getAccessibleSession(req, parseInt(req.params.id));
+  if (!sessionRow) return res.status(404).json({ error: 'not found' });
+  if (req.session.role !== 'admin' && sessionRow.created_by !== req.session.userId) return res.status(403).json({ error: 'owner or admin only' });
+  db.prepare('DELETE FROM sessions WHERE id=?').run(sessionRow.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/sessions/:id/raw', requireAuth, upload.single('file'), (req, res) => {
+  const sessionRow = getAccessibleSession(req, parseInt(req.params.id));
+  if (!sessionRow) return res.status(404).json({ error: 'not found' });
+  if (!req.file) return res.status(400).json({ error: 'no file' });
+  db.prepare("DELETE FROM location_files WHERE session_id=? AND kind='raw'").run(sessionRow.id);
+  db.prepare(`
+    INSERT INTO location_files (location_id, session_id, kind, filename, mime_type, size_bytes, blob, uploaded_by, uploaded_at)
+    VALUES (?, ?, 'raw', ?, ?, ?, ?, ?, ?)
+  `).run(sessionRow.location_id, sessionRow.id, req.file.originalname, req.file.mimetype, req.file.size, req.file.buffer, req.session.userId, Date.now());
+  db.prepare("UPDATE sessions SET status='in_process', updated_at=? WHERE id=?").run(Date.now(), sessionRow.id);
   res.json({ ok: true });
 });
 
@@ -346,6 +460,45 @@ app.post('/api/locations/:id/run', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('placement failed:', e);
     db.prepare('UPDATE locations SET status=?, updated_at=? WHERE id=?').run('errors', Date.now(), id);
+    res.status(500).json({ error: 'placement failed', message: e.message });
+  }
+});
+
+app.post('/api/sessions/:id/run', requireAuth, async (req, res) => {
+  const sessionRow = getAccessibleSession(req, parseInt(req.params.id));
+  if (!sessionRow) return res.status(404).json({ error: 'not found' });
+
+  const raw = db.prepare("SELECT * FROM location_files WHERE session_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(sessionRow.id);
+  const blank = db.prepare("SELECT * FROM location_files WHERE location_id=? AND session_id IS NULL AND kind='blank' ORDER BY uploaded_at DESC LIMIT 1").get(sessionRow.location_id);
+  const ref = db.prepare("SELECT * FROM location_files WHERE location_id=? AND session_id IS NULL AND kind='reference' ORDER BY uploaded_at DESC LIMIT 1").get(sessionRow.location_id);
+  if (!raw || !blank) return res.status(400).json({ error: 'raw roster and venue blank template required' });
+
+  try {
+    const result = await runPlacement(raw.blob, blank.blob, ref ? ref.blob : null);
+    const status = computeStatus(result);
+    const baseName = (sessionRow.name || sessionRow.location_name || 'Session').replace(/[^A-Za-z0-9_-]/g, '_');
+    const outFilename = `${baseName}_Placeholder.xlsx`;
+    const outInfo = db.prepare(`
+      INSERT INTO location_files (location_id, session_id, kind, filename, mime_type, size_bytes, blob, uploaded_by, uploaded_at)
+      VALUES (?, ?, 'output', ?, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ?, ?, ?, ?)
+    `).run(sessionRow.location_id, sessionRow.id, outFilename, result.outputBuffer.length, result.outputBuffer, req.session.userId, Date.now());
+
+    const placement = db.prepare(`
+      INSERT INTO placements (location_id, session_id, run_at, run_by, status, total_beds, placed, warnings_json, compliance_json, assignments_json, output_file_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      sessionRow.location_id, sessionRow.id, Date.now(), req.session.userId,
+      status, result.beds, result.placed,
+      JSON.stringify(result.warnings || []),
+      JSON.stringify(result.compliance || {}),
+      JSON.stringify(result.assignments || []),
+      outInfo.lastInsertRowid
+    );
+    db.prepare('UPDATE sessions SET status=?, updated_at=? WHERE id=?').run(status, Date.now(), sessionRow.id);
+    res.json({ ok: true, id: placement.lastInsertRowid, status, beds: result.beds, placed: result.placed, output_file_id: outInfo.lastInsertRowid });
+  } catch (e) {
+    console.error('session placement failed:', e);
+    db.prepare("UPDATE sessions SET status='errors', updated_at=? WHERE id=?").run(Date.now(), sessionRow.id);
     res.status(500).json({ error: 'placement failed', message: e.message });
   }
 });
@@ -405,11 +558,25 @@ app.get('/api/locations/:id/placement', requireAuth, (req, res) => {
   });
 });
 
-app.post('/api/placements/:id/assignments/:idx', requireAuth, (req, res) => {
+app.get('/api/sessions/:id/placement', requireAuth, (req, res) => {
+  const sessionRow = getAccessibleSession(req, parseInt(req.params.id));
+  if (!sessionRow) return res.status(404).json({ error: 'not found' });
+  const p = db.prepare('SELECT * FROM placements WHERE session_id=? ORDER BY run_at DESC LIMIT 1').get(sessionRow.id);
+  if (!p) return res.json({ placement: null });
+  res.json({
+    placement: {
+      ...p,
+      warnings: JSON.parse(p.warnings_json || '[]'),
+      compliance: JSON.parse(p.compliance_json || '{}'),
+      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p.location_id)
+    }
+  });
+});
+
+function updatePlacementAssignment(req, res) {
   const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: 'not found' });
-  const loc = getAccessibleLocation(req, p.location_id);
-  if (!loc) return res.status(404).json({ error: 'not found' });
+  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
   if (p.is_approved) return res.status(400).json({ error: 'approved placements are locked' });
   const idx = parseInt(req.params.idx);
   const assignments = JSON.parse(p.assignments_json || '[]');
@@ -424,25 +591,25 @@ app.post('/api/placements/:id/assignments/:idx', requireAuth, (req, res) => {
   }
   db.prepare('UPDATE placements SET assignments_json=? WHERE id=?').run(JSON.stringify(assignments), p.id);
   res.json({ ok: true });
-});
+}
+
+app.post('/api/placements/:id/assignments/:idx', requireAuth, updatePlacementAssignment);
+app.patch('/api/placements/:id/assignments/:idx', requireAuth, updatePlacementAssignment);
 
 app.post('/api/placements/:id/approve', requireAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: 'not found' });
-  const loc = getAccessibleLocation(req, p.location_id);
-  if (!loc) return res.status(404).json({ error: 'not found' });
-  if (req.session.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
   db.prepare('UPDATE placements SET is_approved=1, approved_at=?, approved_by=? WHERE id=?')
     .run(Date.now(), req.session.userId, p.id);
+  if (p.session_id) db.prepare("UPDATE sessions SET status='approved', updated_at=? WHERE id=?").run(Date.now(), p.session_id);
   res.json({ ok: true });
 });
 
 app.post('/api/placements/:id/unapprove', requireAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: 'not found' });
-  const loc = getAccessibleLocation(req, p.location_id);
-  if (!loc) return res.status(404).json({ error: 'not found' });
-  if (req.session.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
   db.prepare('UPDATE placements SET is_approved=0, approved_at=NULL, approved_by=NULL WHERE id=?').run(p.id);
   res.json({ ok: true });
 });
@@ -450,10 +617,12 @@ app.post('/api/placements/:id/unapprove', requireAuth, (req, res) => {
 app.post('/api/placements/:id/finalize', requireAuth, async (req, res) => {
   const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: 'not found' });
-  const loc = getAccessibleLocation(req, p.location_id);
-  if (!loc) return res.status(404).json({ error: 'not found' });
+  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
+  const loc = db.prepare('SELECT * FROM locations WHERE id=?').get(p.location_id);
   if (!p.is_approved) return res.status(400).json({ error: 'approve placeholder before finalizing' });
-  const raw = db.prepare("SELECT * FROM location_files WHERE location_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(p.location_id);
+  const raw = p.session_id
+    ? db.prepare("SELECT * FROM location_files WHERE session_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(p.session_id)
+    : db.prepare("SELECT * FROM location_files WHERE location_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(p.location_id);
   const placeholder = db.prepare('SELECT * FROM location_files WHERE id=?').get(p.output_file_id);
   if (!raw || !placeholder) return res.status(400).json({ error: 'raw roster and placeholder output required' });
   try {
@@ -461,13 +630,14 @@ app.post('/api/placements/:id/finalize', requireAuth, async (req, res) => {
     const finalBuffer = await finalizeWithNames(raw.blob, placeholder.blob, assignments);
     const filename = `${loc.name.replace(/[^A-Za-z0-9_-]/g, '_')}_Final.xlsx`;
     const out = db.prepare(`
-      INSERT INTO location_files (location_id, kind, filename, mime_type, size_bytes, blob, uploaded_by, uploaded_at)
-      VALUES (?, 'final', ?, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ?, ?, ?, ?)
-    `).run(p.location_id, filename, finalBuffer.length, finalBuffer, req.session.userId, Date.now());
+      INSERT INTO location_files (location_id, session_id, kind, filename, mime_type, size_bytes, blob, uploaded_by, uploaded_at)
+      VALUES (?, ?, 'final', ?, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ?, ?, ?, ?)
+    `).run(p.location_id, p.session_id || null, filename, finalBuffer.length, finalBuffer, req.session.userId, Date.now());
     db.prepare('UPDATE placements SET finalized_at=?, finalized_by=?, final_file_id=? WHERE id=?')
       .run(Date.now(), req.session.userId, out.lastInsertRowid, p.id);
     db.prepare("UPDATE locations SET status='completed', updated_at=? WHERE id=?").run(Date.now(), p.location_id);
-    res.json({ ok: true, final_file_id: out.lastInsertRowid });
+    if (p.session_id) db.prepare("UPDATE sessions SET status='completed', updated_at=? WHERE id=?").run(Date.now(), p.session_id);
+    res.json({ ok: true, final_file_id: out.lastInsertRowid, filled: assignments.length });
   } catch (e) {
     console.error('finalize failed:', e);
     res.status(500).json({ error: 'finalize failed', message: e.message });
@@ -499,18 +669,33 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => {
   if (!req.session.userId) return res.sendFile(path.join(__dirname, 'public', 'gate.html'));
-  if (req.session.role === 'admin') return res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-  return res.sendFile(path.join(__dirname, 'public', 'app.html'));
+  if (req.session.role === 'admin') return res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+  return res.sendFile(path.join(__dirname, 'public', 'operations.html'));
 });
 
 app.get('/admin', (req, res) => {
   if (!req.session.userId || req.session.role !== 'admin') return res.redirect('/');
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+app.get('/dashboard', (req, res) => {
+  if (!req.session.userId || req.session.role !== 'admin') return res.redirect('/');
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
 app.get('/app', (req, res) => {
   if (!req.session.userId) return res.redirect('/');
-  res.sendFile(path.join(__dirname, 'public', 'app.html'));
+  res.sendFile(path.join(__dirname, 'public', 'operations.html'));
+});
+
+app.get('/operations', (req, res) => {
+  if (!req.session.userId) return res.redirect('/');
+  res.sendFile(path.join(__dirname, 'public', 'operations.html'));
+});
+
+app.get('/session/:id', (req, res) => {
+  if (!req.session.userId) return res.redirect('/');
+  res.sendFile(path.join(__dirname, 'public', 'operations.html'));
 });
 
 app.get('/location/:id', (req, res) => {

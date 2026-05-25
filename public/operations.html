@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1200">
+<title>UCA — Camp Housing Operations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body class="vs-ops-body">
+
+<header class="vs-ops-header">
+  <a class="vs-lockup" href="/">
+    <span class="vs-wordmark">UCA</span>
+    <span class="vs-divider"></span>
+    <span class="vs-product">Camp Housing Operations</span>
+  </a>
+  <div class="vs-ops-context">
+    <div><span class="ctx-label">Session</span><span class="ctx-value" id="ctx-session">—</span></div>
+    <div><span class="ctx-label">Location</span><span class="ctx-value" id="ctx-location">—</span></div>
+    <span class="vs-pill" id="ctx-status"><span class="dot"></span>Awaiting Input</span>
+  </div>
+  <div id="vs-profile-mount" style="margin-left:18px;"></div>
+</header>
+
+<nav class="vs-stepnav" id="stepnav">
+  <div class="step-item active" data-step="1"><span class="num">1</span>Upload</div>
+  <div class="step-item disabled" data-step="2"><span class="num">2</span>Analyze</div>
+  <div class="step-item disabled" data-step="3"><span class="num">3</span>Placeholder Build</div>
+  <div class="step-item disabled" data-step="4"><span class="num">4</span>Approval</div>
+  <div class="step-item disabled" data-step="5"><span class="num">5</span>Finalize</div>
+  <div class="step-item disabled" data-step="6"><span class="num">6</span>Export</div>
+</nav>
+
+<main class="vs-ops-main">
+
+  <!-- Resume / new session strip (shown when there are existing sessions) -->
+  <section class="vs-panel" id="resume-panel" hidden>
+    <div class="vs-panel-head">
+      <h2>Your Sessions</h2>
+      <div class="right"><button class="vs-btn vs-btn-sm" id="new-session-btn">+ New Session</button></div>
+    </div>
+    <div class="vs-panel-body no-pad">
+      <div id="sessions-list"></div>
+    </div>
+  </section>
+
+  <!-- Step 1: Pick Venue + Step 2: Upload Roster -->
+  <div class="vs-grid-2" id="setup-grid">
+    <section class="vs-panel" id="step-location">
+      <div class="vs-panel-head">
+        <span class="step-badge">1</span>
+        <h2>Camp Location</h2>
+        <div class="right"><span class="vs-pill" id="status-location"><span class="dot"></span>Required</span></div>
+      </div>
+      <div class="vs-panel-body">
+        <label class="vs-label" for="location-select">Select location (admin-curated)</label>
+        <select id="location-select" class="vs-select">
+          <option value="">— Select a camp location —</option>
+        </select>
+        <div id="location-info" style="margin-top: 16px;"></div>
+        <div id="location-warn" style="margin-top: 12px;"></div>
+      </div>
+    </section>
+
+    <section class="vs-panel disabled" id="step-upload">
+      <div class="vs-panel-head">
+        <span class="step-badge">2</span>
+        <h2>Raw Roster Upload</h2>
+        <div class="right"><span class="vs-pill" id="status-upload"><span class="dot"></span>Waiting</span></div>
+      </div>
+      <div class="vs-panel-body">
+        <div class="vs-input-grid" style="margin-bottom:12px;">
+          <div>
+            <label class="vs-label" for="session-name">Session name (optional)</label>
+            <input type="text" id="session-name" class="vs-input" placeholder="e.g. UCF Session 1 – Jun 19">
+          </div>
+          <div style="display:flex; align-items:flex-end;">
+            <button class="vs-btn vs-btn-secondary" id="create-session-btn" disabled>Create Session</button>
+          </div>
+        </div>
+        <div class="vs-dropzone" id="dropzone">
+          <div id="dropzone-default">
+            <strong>Click to upload</strong> or drag the raw Salesforce export here
+            <div class="meta">.xlsx — Account, Occupancy, names, roles, gender, early/late columns</div>
+          </div>
+          <div id="dropzone-loaded" style="display:none;"></div>
+        </div>
+        <input type="file" id="raw-input" accept=".xlsx,.xls" style="display:none;">
+        <div id="upload-msg" style="margin-top: 10px;"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Step 3: Session Analysis + Placeholder Build -->
+  <section class="vs-panel disabled" id="step-review">
+    <div class="vs-panel-head">
+      <span class="step-badge">3</span>
+      <h2>Session Analysis &amp; Placeholder Build</h2>
+      <div class="right">
+        <button class="vs-btn vs-btn-sm vs-btn-secondary" id="run-btn" disabled>Run Placement</button>
+        <span class="vs-pill" id="status-review"><span class="dot"></span>Waiting</span>
+      </div>
+    </div>
+    <div class="vs-panel-body" id="review-body">
+      <div class="vs-alert info">Select a camp location and upload raw roster data, then click <b>Run Placement</b>.</div>
+    </div>
+  </section>
+
+  <!-- Step 4-6: Approval + Finalize + Export -->
+  <section class="vs-panel disabled" id="step-finalize">
+    <div class="vs-panel-head">
+      <span class="step-badge">4</span>
+      <h2>Approval &amp; Export</h2>
+      <div class="right"><span class="vs-pill" id="status-finalize"><span class="dot"></span>Waiting</span></div>
+    </div>
+    <div class="vs-panel-body">
+      <div class="vs-alert info" style="margin-bottom: 16px;">
+        Review the placement above. When everything looks right, <b>approve the placeholder</b> to lock the layout.
+        Then <b>finalize with names</b> to write the actual roster names into the workbook for export.
+      </div>
+      <div id="approval-actions" class="vs-btn-row"></div>
+      <div id="finalize-status" style="margin-top: 14px;"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="vs-ops-footer">
+  Internal use only · server-side processing · workbook structure preserved byte-for-byte
+</footer>
+
+<script src="/profile.js"></script>
+<script src="/operations.js"></script>
+
+</body>
+</html>
