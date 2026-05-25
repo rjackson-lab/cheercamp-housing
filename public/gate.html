@@ -33,9 +33,22 @@
           <input type="password" class="vs-input" name="password" autocomplete="current-password" required>
         </div>
         <button type="submit" class="vs-btn" style="width:100%">Sign In</button>
-        <div style="margin-top:14px; text-align:center; font-size:12px;">
-          Don't have an account?
+        <div style="margin-top:14px; text-align:center; font-size:12px; display:flex; justify-content:space-between;">
+          <a href="#" id="forgot-pw">Forgot password?</a>
           <a href="#" id="show-signup">Request access</a>
+        </div>
+      </form>
+
+      <!-- FORGOT PASSWORD -->
+      <form id="forgot-form" class="hidden">
+        <div class="vs-form-row">
+          <label class="vs-label">Email</label>
+          <input type="email" class="vs-input" name="email" autocomplete="email" required>
+          <div style="font-size:11px; color:var(--vs-text-mute); margin-top:4px;">We'll send a reset link if this email is registered.</div>
+        </div>
+        <button type="submit" class="vs-btn" style="width:100%">Send reset link</button>
+        <div style="margin-top:14px; text-align:center; font-size:12px;">
+          <a href="#" id="back-to-login">Back to sign in</a>
         </div>
       </form>
 
@@ -84,15 +97,40 @@ $('show-signup').onclick = (e) => {
   e.preventDefault();
   loginForm.classList.add('hidden');
   signupForm.classList.remove('hidden');
+  $('forgot-form').classList.add('hidden');
   formTitle.textContent = 'Request Access';
   clearAlert();
 };
 $('show-login').onclick = (e) => {
   e.preventDefault();
   signupForm.classList.add('hidden');
+  $('forgot-form').classList.add('hidden');
   loginForm.classList.remove('hidden');
   formTitle.textContent = 'Sign In';
   clearAlert();
+};
+$('forgot-pw').onclick = (e) => {
+  e.preventDefault();
+  loginForm.classList.add('hidden');
+  signupForm.classList.add('hidden');
+  $('forgot-form').classList.remove('hidden');
+  formTitle.textContent = 'Reset Password';
+  clearAlert();
+};
+$('back-to-login').onclick = (e) => {
+  e.preventDefault();
+  $('forgot-form').classList.add('hidden');
+  loginForm.classList.remove('hidden');
+  formTitle.textContent = 'Sign In';
+  clearAlert();
+};
+$('forgot-form').onsubmit = async (e) => {
+  e.preventDefault();
+  clearAlert();
+  const email = new FormData(e.target).get('email');
+  await fetch('/api/password/reset/request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email }) });
+  showAlert('success', 'If that email is registered, a reset link has been sent.');
+  e.target.reset();
 };
 
 loginForm.onsubmit = async (e) => {

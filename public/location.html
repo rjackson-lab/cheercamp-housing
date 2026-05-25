@@ -13,39 +13,39 @@
     <span class="vs-brand-sub">Camp Housing</span>
   </div>
   <div class="vs-user-bar">
-    <a href="#" id="back-link" style="color:#fff; opacity:0.85;">← Back</a>
+    <a href="/" id="back-link" style="color:#fff; opacity:0.85;">← Dashboard</a>
     <span id="user-name"></span>
+    <button id="open-chat-btn" class="vs-btn vs-btn-sm vs-btn-gold" style="margin-left:6px;">💬 AI Chat</button>
   </div>
 </header>
 
 <main class="vs-page">
   <div id="header-block"></div>
 
+  <!-- Step 1: Upload Files -->
   <div class="vs-panel">
-    <div class="vs-panel-header">
-      <span>1. Upload Files</span>
-    </div>
+    <div class="vs-panel-header"><span>1. Upload Files</span></div>
     <div class="vs-panel-body">
-      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:14px;">
-        <div class="upload-slot" data-kind="raw">
+      <div class="upload-grid">
+        <div class="upload-slot">
           <div class="vs-label">Raw Roster Data <span style="color:var(--vs-error)">*</span></div>
           <div class="upload-status" id="status-raw">No file</div>
           <input type="file" accept=".xlsx,.xls" data-kind="raw" class="file-input" hidden>
           <button class="vs-btn vs-btn-sm vs-btn-secondary" data-upload="raw">Choose file…</button>
         </div>
-        <div class="upload-slot" data-kind="blank">
+        <div class="upload-slot">
           <div class="vs-label">Blank Template <span style="color:var(--vs-error)">*</span></div>
           <div class="upload-status" id="status-blank">No file</div>
           <input type="file" accept=".xlsx,.xls" data-kind="blank" class="file-input" hidden>
           <button class="vs-btn vs-btn-sm vs-btn-secondary" data-upload="blank">Choose file…</button>
         </div>
-        <div class="upload-slot" data-kind="reference">
+        <div class="upload-slot">
           <div class="vs-label">Reference Template <span class="vs-muted">(optional)</span></div>
           <div class="upload-status" id="status-reference">No file</div>
           <input type="file" accept=".xlsx,.xls" data-kind="reference" class="file-input" hidden>
           <button class="vs-btn vs-btn-sm vs-btn-secondary" data-upload="reference">Choose file…</button>
         </div>
-        <div class="upload-slot" data-kind="floorplan">
+        <div class="upload-slot">
           <div class="vs-label">Floor Plans <span class="vs-muted">(multiple PDFs)</span></div>
           <div class="upload-status" id="status-floorplan">0 files</div>
           <input type="file" accept=".pdf" data-kind="floorplan" class="file-input" hidden>
@@ -56,6 +56,7 @@
     </div>
   </div>
 
+  <!-- Step 2: Run Placement -->
   <div class="vs-panel">
     <div class="vs-panel-header">
       <span>2. Run Placement</span>
@@ -66,15 +67,67 @@
     </div>
   </div>
 
-  <div class="vs-panel hidden" id="download-panel">
+  <!-- Step 3: Review Placeholder -->
+  <div class="vs-panel hidden" id="review-panel">
     <div class="vs-panel-header">
-      <span>3. Download Roster</span>
+      <span>3. Review Placeholder</span>
+      <div id="review-actions"></div>
     </div>
-    <div class="vs-panel-body">
-      <div id="download-content"></div>
-    </div>
+    <div class="vs-panel-body" id="review-body"></div>
+  </div>
+
+  <!-- Step 4: Finalize -->
+  <div class="vs-panel hidden" id="finalize-panel">
+    <div class="vs-panel-header"><span>4. Finalize with Names</span></div>
+    <div class="vs-panel-body" id="finalize-body"></div>
+  </div>
+
+  <!-- Run history -->
+  <div class="vs-panel hidden" id="history-panel">
+    <div class="vs-panel-header"><span>Run History</span></div>
+    <div class="vs-panel-body" id="history-body" style="padding:0;"></div>
+  </div>
+
+  <!-- Members / sharing -->
+  <div class="vs-panel hidden" id="members-panel">
+    <div class="vs-panel-header"><span>Shared Access</span></div>
+    <div class="vs-panel-body" id="members-body"></div>
+  </div>
+
+  <div style="margin-top:30px; text-align:right;">
+    <button class="vs-btn vs-btn-danger vs-btn-sm" id="delete-loc">Delete this location</button>
   </div>
 </main>
+
+<!-- AI Chat Drawer -->
+<aside id="chat-drawer" class="vs-chat-drawer hidden">
+  <div class="vs-chat-header">
+    <span>AI Assistant</span>
+    <button id="close-chat" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;">×</button>
+  </div>
+  <div id="chat-messages" class="vs-chat-messages">
+    <div class="vs-chat-empty">Ask about the placement or describe a change you need.</div>
+  </div>
+  <form id="chat-form" class="vs-chat-input">
+    <textarea id="chat-text" placeholder="e.g. Why is West Shore on two floors?" rows="2"></textarea>
+    <button type="submit" class="vs-btn vs-btn-sm">Send</button>
+  </form>
+</aside>
+
+<!-- Edit location modal -->
+<div id="modal-edit-loc" class="vs-modal-bg hidden">
+  <div class="vs-modal">
+    <div class="vs-modal-header">Edit Location</div>
+    <div class="vs-modal-body">
+      <div class="vs-form-row"><label class="vs-label">Name</label><input type="text" class="vs-input" id="edit-name"></div>
+      <div class="vs-form-row"><label class="vs-label">Description</label><textarea class="vs-textarea" id="edit-desc"></textarea></div>
+    </div>
+    <div class="vs-modal-footer">
+      <button class="vs-btn vs-btn-secondary" id="edit-cancel">Cancel</button>
+      <button class="vs-btn" id="edit-save">Save</button>
+    </div>
+  </div>
+</div>
 
 <script src="/location.js"></script>
 </body>

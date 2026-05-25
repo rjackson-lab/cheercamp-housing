@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset Password · Cheer Camp Housing</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="vs-header">
+  <div class="vs-brand"><span class="vs-brand-mark">UCA</span><span class="vs-brand-sub">Reset Password</span></div>
+</header>
+<main class="vs-page-narrow">
+  <div class="vs-panel">
+    <div class="vs-panel-header">Choose a new password</div>
+    <div class="vs-panel-body">
+      <div id="alert-slot"></div>
+      <form id="form">
+        <div class="vs-form-row">
+          <label class="vs-label">New password</label>
+          <input type="password" class="vs-input" name="password" minlength="8" required>
+          <div style="font-size:11px; color:var(--vs-text-mute); margin-top:4px;">Minimum 8 characters</div>
+        </div>
+        <button class="vs-btn" type="submit" style="width:100%">Save new password</button>
+      </form>
+    </div>
+  </div>
+</main>
+<script>
+const token = new URLSearchParams(location.search).get('token');
+const slot = document.getElementById('alert-slot');
+if (!token) slot.innerHTML = '<div class="vs-alert error">Missing reset token.</div>';
+document.getElementById('form').onsubmit = async (e) => {
+  e.preventDefault();
+  slot.innerHTML = '';
+  const password = e.target.password.value;
+  const r = await fetch('/api/password/reset/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token, password }) });
+  const d = await r.json();
+  if (r.ok) {
+    slot.innerHTML = '<div class="vs-alert success">Password updated. <a href="/">Sign in →</a></div>';
+    e.target.reset();
+  } else {
+    slot.innerHTML = `<div class="vs-alert error">${d.error || 'Reset failed'}</div>`;
+  }
+};
+</script>
+</body>
+</html>

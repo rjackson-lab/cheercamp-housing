@@ -11,11 +11,22 @@ services:
         generateValue: true
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: "22"
       - key: DATA_DIR
         value: /data
       - key: PARKER_EMAIL
         sync: false
       - key: PARKER_PW
+        sync: false
+      - key: APP_URL
+        sync: false
+      # Optional — set these in Render dashboard to enable AI chat + emails
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
         sync: false
     disk:
       name: data

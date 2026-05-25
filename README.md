@@ -1,220 +1,121 @@
 # Cheer Camp Housing — Multi-Location Web App
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/rjackson-lab/cheercamp-housing)
+Multi-user housing placement tool. Parker Jackson (master admin) approves access; team submitters upload rosters; the engine generates placement; Parker reviews and approves the placeholder, then finalizes with real names.
 
-A multi-user housing placement tool for cheer camp operations. Parker Jackson (master admin) approves user signups, manages multiple camp locations, and each location runs the same placement engine on its own files.
+## Workflow
 
----
+1. **Sign up** — request access → Parker approves
+2. **Login** → Locations dashboard
+3. **Create location** (or open one shared with you)
+4. **Upload files**: raw roster (.xlsx), blank template (.xlsx), reference (optional .xlsx), floor plans (.pdf, optional)
+5. **Run Placement Engine** — generates placeholder roster with Gender (M/F) and Role (Athlete/Coach/Chaperone) populated in every row for review
+6. **Review** — bed-by-bed table with searchable filters; click any Gender or Role cell to override before approval
+7. **Approve Placeholder** — locks the assignment, enables finalize
+8. **Finalize with Names** — generates the final .xlsx with real first/last names filled in from the raw roster
+9. **AI Chat** — ask the assistant questions about the placement or describe needed changes (requires `ANTHROPIC_API_KEY`)
 
-## What's in this app
+## Default login
 
-**Auth & Roles**
-- Public signup → status `pending`
-- Parker Jackson must approve before login is allowed
-- Roles: `admin` (full access), `user` (create/manage own locations)
-
-**Per-Location Workflow**
-Each camp location has:
-- **Raw roster data** (xlsx — the registration export)
-- **Blank template** (xlsx — the destination roster format)
-- **Reference template** (xlsx, optional — completed prior-session for structural reference)
-- **Floor plans** (PDFs, multiple allowed)
-- Auto-runs the placement engine and stores the output
-
-**Admin Dashboard (Parker only)**
-- Pending access requests (approve / reject inline)
-- Locations split into **Completed / In Process / Errors-or-Not-Started**
-- Stat cards for at-a-glance counts
-- User list (promote to admin)
-
-**Placement Engine (same rules per location)**
-- No mixed-gender pods (strict, per-bed gender enforcement)
-- No mixed schools in any pod
-- Teams kept on same floor when possible
-- Proportional multi-floor split with chaperone coverage when forced
-- Buffer pod left between teams when floor space allows
-- Staff housed in dedicated staff hall
-- Outputs a placeholder roster as xlsx (byte-preserving surgical writer)
-
----
-
-## Quick start (local)
-
-```bash
-npm install
-node server.js
-# Visit http://localhost:3000
-```
-
-On first boot, Parker Jackson is auto-created:
 - Email: `pjackson@varsity.com`
 - Password: `Varsity2026`
 
-These defaults can be overridden via `PARKER_EMAIL` and `PARKER_PW` env vars before first boot.
-
----
+(Override via `PARKER_EMAIL` / `PARKER_PW` before first boot.)
 
 ## Required environment variables
 
-| Variable | Required? | Notes |
-|---|---|---|
-| `PORT` | no | defaults to `3000` (hosting platforms set this automatically) |
-| `SESSION_SECRET` | **yes in production** | random 32+ char string for cookie signing |
-| `PARKER_EMAIL` | recommended | Parker's email (used only on first boot to seed admin) |
-| `PARKER_PW` | **strongly recommended** | Parker's initial password (8+ chars) |
-| `DATA_DIR` | optional | absolute path where `housing.db` lives (default: `./data`) |
-| `NODE_ENV` | recommended | set to `production` on the host to enable secure cookies |
+| Variable | Purpose |
+|---|---|
+| `PORT` | Render auto-sets; defaults to 3000 |
+| `SESSION_SECRET` | **Required in production.** Random 32+ char string for cookie signing |
+| `DATA_DIR` | Where SQLite DB lives. Use `/data` on Render (with attached disk) |
+| `NODE_ENV` | Set to `production` to enable secure cookies |
+| `APP_URL` | Public URL of your deployment (used in email links). E.g. `https://cheercamp-housing.onrender.com` |
+| `PARKER_EMAIL` | Master admin email (first boot only) |
+| `PARKER_PW` | Master admin password (first boot only) |
 
----
+## Optional environment variables (for full feature set)
 
-## Deploy on Render
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Enables AI chat. Get one at console.anthropic.com |
+| `ANTHROPIC_MODEL` | Override default model (`claude-sonnet-4-20250514`) |
+| `RESEND_API_KEY` | Enables outbound email. Sign up at resend.com (3,000 free emails/mo). Without this, all emails log to the server console |
+| `MAIL_FROM` | From address. Default: `Cheer Camp Housing <onboarding@resend.dev>` (Resend's test sender). For production, verify your own domain in Resend and use `Housing <housing@yourdomain.com>` |
 
-1. In Render, choose **New +** → **Blueprint** and connect `rjackson-lab/cheercamp-housing`.
-   - You can also use the **Deploy to Render** button at the top of this README.
-   - For this private GitHub repo, make sure the Render GitHub app is installed for `rjackson-lab/cheercamp-housing`.
-2. Render will read the root `render.yaml`.
-3. Configure:
-   - **Environment:** Node
-   - **Build Command:** `npm install`
-   - **Start Command:** `node server.js`
-   - **Instance Type:** Starter ($7/mo — required for persistent disk)
-4. Under **Disks**, add a disk:
-   - **Name:** `data`
-   - **Mount Path:** `/data`
-   - **Size:** 1 GB (plenty)
-5. Under **Environment**, set:
-   - `SESSION_SECRET` = (click Generate)
-   - `PARKER_EMAIL` = `parker@yourdomain.com`
-   - `PARKER_PW` = (a strong password — change after first login)
-   - `DATA_DIR` = `/data`
-   - `NODE_ENV` = `production`
-6. Deploy. First boot will seed Parker. Sign in at the Render URL.
+## Email notifications
 
-If `PARKER_PW` is not set before the first deploy, the app generates a temporary first-login password and prints it in the Render deploy logs. Store that password immediately, then set `PARKER_PW` in Render before future redeploys.
+When configured (`RESEND_API_KEY` set), the system sends:
+- **New signup → all admins** with approve/reject link
+- **Account approved → the user** with sign-in link
+- **Password reset → the user** with a 1-hour reset link
 
-If Render cannot see the repo, open GitHub → **Settings** → **Applications** → **Installed GitHub Apps** → **Render**, then grant access to `rjackson-lab/cheercamp-housing`. The repository is private, so Render must be explicitly authorized.
+Without `RESEND_API_KEY`, emails print to the server console (visible in Render logs) — useful for development, but real users won't get them.
 
----
+## Per-location access
 
-## Deploy on Railway
+- **Admins** see all locations
+- **Regular users** see only locations they created OR were granted access to
+- Grant access from the location page → Shared Access panel → enter approved user's email
 
-1. Push to GitHub.
-2. railway.app → **New Project** → **Deploy from GitHub**.
-3. Add a **Volume**:
-   - Mount Path: `/data`
-4. Variables (same as Render above): `SESSION_SECRET`, `PARKER_EMAIL`, `PARKER_PW`, `DATA_DIR=/data`, `NODE_ENV=production`.
-5. Deploy.
+## Deployment on Render
 
----
+Render auto-reads `render.yaml`. Steps:
 
-## Deploy on a VPS (DigitalOcean, Linode, EC2, etc.)
+1. Push to GitHub
+2. render.com → New + → Web Service → connect repo
+3. Set sensitive env vars in the dashboard:
+   - `SESSION_SECRET` (click Generate)
+   - `PARKER_EMAIL`, `PARKER_PW` (your choice)
+   - `APP_URL` (your render URL, e.g. `https://cheercamp-housing.onrender.com`)
+   - `ANTHROPIC_API_KEY` (optional, for AI chat)
+   - `RESEND_API_KEY` + `MAIL_FROM` (optional, for emails)
+4. Plan: **Starter** ($7/mo) — required for the persistent disk that keeps your DB alive across restarts
+5. Deploy
+
+## Local development
 
 ```bash
-# On the server
-git clone <your-repo> /opt/cheercamp
-cd /opt/cheercamp
-npm install --production
-mkdir -p /var/lib/cheercamp
-
-# Run under systemd
-sudo tee /etc/systemd/system/cheercamp.service <<EOF
-[Unit]
-Description=Cheer Camp Housing
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/cheercamp
-Environment=PORT=3000
-Environment=DATA_DIR=/var/lib/cheercamp
-Environment=SESSION_SECRET=CHANGE_ME_TO_RANDOM_STRING
-Environment=PARKER_EMAIL=parker@yourdomain.com
-Environment=PARKER_PW=CHANGE_ME_STRONG_PASSWORD
-Environment=NODE_ENV=production
-ExecStart=/usr/bin/node server.js
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl enable --now cheercamp
+npm install
+PARKER_EMAIL=test@local PARKER_PW=Varsity2026 node server.js
+# visit http://localhost:3000
 ```
 
-Front it with nginx + Let's Encrypt for HTTPS.
-
----
-
-## File / directory layout
+## Files
 
 ```
-.
-├── server.js                # Express app — all API routes
-├── package.json
-├── lib/
-│   ├── db.js                # SQLite schema + Parker bootstrap
-│   ├── placement.js         # Engine entry: runPlacement(raw, blank, ref)
-│   └── _placement_core.js   # Ported algorithm (ingest / parse / build / compliance / surgical writer)
-├── public/
-│   ├── styles.css           # UCA brand (Montserrat, navy + gold)
-│   ├── gate.html            # Login + signup
-│   ├── admin.html           # Parker's dashboard
-│   ├── admin.js
-│   ├── app.html             # User dashboard (location grid)
-│   ├── location.html        # Per-location workspace
-│   └── location.js
-└── data/                    # SQLite DB + uploaded files (BLOBs)
-    └── housing.db           # Created on first run
+server.js               # Express app — all routes
+package.json
+render.yaml             # Render deploy config
+lib/
+  db.js                 # SQLite schema + Parker bootstrap
+  placement.js          # Engine entry: runPlacement, finalizeWithNames
+  _placement_core.js    # Ported placement algorithm
+  mail.js               # Email helper (Resend)
+  ai.js                 # AI chat helper (Anthropic)
+public/
+  styles.css            # UCA brand (Montserrat + navy/gold)
+  gate.html             # Login + signup + forgot password
+  dashboard.html        # Unified locations dashboard (admin + user)
+  dashboard.js
+  location.html         # Per-location workspace
+  location.js
+  reset.html            # Password reset confirmation
+data/                   # Created at runtime — SQLite DB + uploaded files
 ```
 
----
+## Status / approval state model
 
-## How the engine status mapping works
-
-After a placement run, the location's status is computed:
-
-| Condition | Status |
+| Location status | Meaning |
 |---|---|
-| Any of: occupancy / bathroom / staff-sep / school-mix violations | `errors` |
-| Beds placed < total beds | `errors` |
-| Team splits OR mixed-gender floors OR warnings present | `in_process` |
-| Clean — zero advisories | `completed` |
+| `not_started` | No placement runs yet |
+| `in_process` | Placement run but has advisory issues (team splits, mixed-gender floors) |
+| `errors` | Placement run with blocker violations or fewer than expected beds placed |
+| `completed` | Finalized roster generated |
 
-Team-splits and mixed-gender-floor counts are advisory, not blockers — they reflect operational reality when teams have minority-gender members.
-
----
-
-## Admin operations cheat-sheet
-
-| Task | How |
+| Placement state | UI |
 |---|---|
-| Approve a signup | Pending Access Requests panel → **Approve** |
-| Reject a signup | Pending Access Requests panel → **Reject** |
-| Promote user to admin | All Users panel → **Make admin** |
-| Create new location | **+ New Location** button (top right) |
-| Upload files to a location | Click the location card → upload buttons in "Upload Files" panel |
-| Run placement | Location page → **Run Placement Engine** |
-| Download finished roster | Location page → "Download Roster" panel → **Download .xlsx** |
-| Delete a location | API only (admin role): `DELETE /api/locations/:id` |
+| Run, not approved | "Approve Placeholder" button enabled (or disabled if blockers) |
+| Approved | "Approved [date]" stamp; "Finalize with Names" button appears |
+| Finalized | Download Final Roster button |
 
----
-
-## Security notes
-
-- Passwords hashed with bcrypt (10 rounds)
-- Sessions stored server-side in SQLite (not JWT — easy revocation)
-- Cookies are `httpOnly`; set `NODE_ENV=production` to enable `secure` flag (HTTPS-only)
-- File uploads capped at 25 MB
-- Generate a unique `SESSION_SECRET` per deployment
-- Change Parker's default password immediately after first login (no UI for self-service password change yet — use SQL: `UPDATE users SET password_hash=? WHERE email='parker@...'` with a bcrypt-hashed value, or add an admin endpoint)
-
----
-
-## Future enhancements (not yet built)
-
-- Self-service password change UI
-- Email notifications on signup/approval
-- Per-location run history viewer with diff
-- Floor-plan annotation overlay
-- "Finalize with names" step (currently outputs placeholders only — name-filling is the next step in the placement workflow but not yet wired into the API)
+Admin can **unapprove** to unlock for further edits.
