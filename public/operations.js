@@ -383,7 +383,7 @@ function renderReview(p) {
   };
   const assignedByHallFloor = {};
   for (const x of a) {
-    const hall = x.sheet || '';
+    const hall = x.hall || x.sheet || '';
     const floor = x.floor != null ? String(x.floor) : '';
     if (!assignedByHallFloor[hall]) assignedByHallFloor[hall] = {};
     assignedByHallFloor[hall][floor] = (assignedByHallFloor[hall][floor] || 0) + 1;
@@ -400,7 +400,7 @@ function renderReview(p) {
       <td>${h.capacity || 0}</td>
       <td>${assigned}</td>
       <td>${Math.max(0, (h.capacity || 0) - assigned)}</td>
-      <td>${floorUsage}</td>
+      <td>${floorUsage}${(h.floorplans || []).length ? `<div class="vs-muted">${h.floorplans.length} floor plan${h.floorplans.length === 1 ? '' : 's'} on file</div>` : ''}</td>
       <td><span class="badge ${assigned > (h.capacity || 0) ? 'danger' : 'ok'}">${assigned > (h.capacity || 0) ? 'Over' : 'OK'}</span></td>
     </tr>`;
   }).join('');
@@ -430,11 +430,12 @@ function renderReview(p) {
   // Hall breakdown
   const bySheetFloor = {};
   for (const x of a) {
-    if (!bySheetFloor[x.sheet]) bySheetFloor[x.sheet] = {};
+    const hallName = x.hall || x.sheet;
+    if (!bySheetFloor[hallName]) bySheetFloor[hallName] = {};
     const fl = x.floor != null ? String(x.floor) : '?';
-    if (!bySheetFloor[x.sheet][fl]) bySheetFloor[x.sheet][fl] = {};
+    if (!bySheetFloor[hallName][fl]) bySheetFloor[hallName][fl] = {};
     const label = displayAssignmentLabel(x);
-    bySheetFloor[x.sheet][fl][label] = (bySheetFloor[x.sheet][fl][label] || 0) + 1;
+    bySheetFloor[hallName][fl][label] = (bySheetFloor[hallName][fl][label] || 0) + 1;
   }
   const hallPanels = Object.entries(bySheetFloor).map(([hall, floors]) => {
     const totalBeds = Object.values(floors).reduce((s, f) => s + Object.values(f).reduce((a,b)=>a+b,0), 0);

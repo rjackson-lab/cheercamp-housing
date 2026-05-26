@@ -577,14 +577,31 @@ function templateInventoryForLocation(locationId) {
     WHERE location_id=? AND kind='blank'
     ORDER BY uploaded_at DESC LIMIT 1
   `).get(locationId);
-  const inventory = { rooms: {}, halls: [] };
+  const floorPlans = db.prepare(`
+    SELECT id, filename FROM location_files
+    WHERE location_id=? AND kind='floorplan'
+    ORDER BY filename
+  `).all(locationId);
+  const inventory = { rooms: {}, halls: [], floorPlans };
   if (latestBlank) {
     try {
       const XLSX = require('xlsx');
       const coreSrc = fs.readFileSync(path.join(__dirname, 'lib', '_placement_core.js'), 'utf8');
       const core = (new Function('XLSX', 'JSZip', coreSrc + '\nreturn { parseTemplate };'))(XLSX, require('jszip'));
       const wb = XLSX.read(latestBlank.blob, { type: 'buffer', cellStyles: true });
-      for (const hall of core.parseTemplate(wb, wb)) {
+      const hallsByName = {};
+      for (const parsedHall of core.parseTemplate(wb, wb)) {
+        for (const room of parsedHall.rooms) {
+          const name = room.hall_name || parsedHall.name;
+          if (!hallsByName[name]) hallsByName[name] = {
+            name,
+            is_staff_hall: parsedHall.is_staff_hall || /staff/i.test(name),
+            rooms: []
+          };
+          hallsByName[name].rooms.push(room);
+        }
+      }
+      for (const hall of Object.values(hallsByName)) {
         const usableRooms = hall.rooms.filter(r => !r.is_ra && !r.is_excluded);
         const floors = {};
         for (const room of usableRooms) {
@@ -596,7 +613,12 @@ function templateInventoryForLocation(locationId) {
           name: hall.name,
           is_staff_hall: !!hall.is_staff_hall,
           capacity: usableRooms.length,
-          floors
+          floors,
+          floorplans: floorPlans.filter(fp => {
+            const f = String(fp.filename || '').toLowerCase();
+            const hallName = String(hall.name || '').toLowerCase();
+            return hallName.split(/\s+|-/).filter(Boolean).some(part => part.length > 2 && f.includes(part));
+          })
         });
       }
     } catch (e) {
@@ -619,6 +641,7 @@ function enrichAssignments(assignments, placement, accounts = [], inventory = nu
       team: account || a.team || a.label || '',
       category: a.category || assignmentCategory(a.label),
       room_id: a.room_id || room.room_id || '',
+      hall: a.hall || room.hall_name || a.sheet || '',
       floor: a.floor || room.floor || '',
       suite_id: a.suite_id || room.suite_id || ''
     };
