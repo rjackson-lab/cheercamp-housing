@@ -452,8 +452,7 @@ function renderReview(p) {
     </div>`;
   }).join('');
 
-  // Bed-by-bed editable table (if not approved)
-  const bedRows = a.map((x, idx) => {
+  const assignmentControls = (x, idx) => {
     const editable = !p.is_approved;
     const genderSel = editable
       ? `<select data-idx="${idx}" data-field="gender" class="vs-mini-sel">
@@ -467,8 +466,51 @@ function renderReview(p) {
              `<option value="${c2}" ${x.category === c2 ? 'selected':''}>${c2}</option>`).join('')}
          </select>`
       : `<span class="badge">${escape(x.category)}</span>`;
+    return { catSel, genderSel };
+  };
+
+  // Grouped bed-by-bed editable review, arranged like the approval breakdown.
+  const bedGroups = {};
+  a.forEach((x, idx) => {
+    const hall = x.hall || x.sheet || 'Unassigned Hall';
+    const floor = x.floor != null ? String(x.floor) : '?';
+    if (!bedGroups[hall]) bedGroups[hall] = {};
+    if (!bedGroups[hall][floor]) bedGroups[hall][floor] = [];
+    bedGroups[hall][floor].push({ ...x, _idx: idx });
+  });
+  const groupedBedPanels = Object.entries(bedGroups).map(([hall, floors]) => {
+    const hallTotal = Object.values(floors).reduce((s, rows) => s + rows.length, 0);
+    const floorBlocks = Object.entries(floors)
+      .sort((a,b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+      .map(([fl, rows]) => {
+        const bedItems = rows
+          .sort((a,b) => String(a.room_id || '').localeCompare(String(b.room_id || ''), undefined, { numeric: true }))
+          .map(x => {
+            const { catSel, genderSel } = assignmentControls(x, x._idx);
+            return `<div class="vs-bed-row">
+              <span class="room">${escape(x.room_id || '')}</span>
+              <span class="team">${escape(x.team || x.account || '')}</span>
+              <span class="role">${catSel}</span>
+              <span class="gender">${genderSel}</span>
+            </div>`;
+          }).join('');
+        return `<div class="vs-floor">
+          <div class="floor-head">Floor ${escape(fl)} <span>${rows.length} beds</span></div>
+          <div class="vs-bed-list">${bedItems}</div>
+        </div>`;
+      }).join('');
+    return `<div class="vs-hall-panel">
+      <div class="hall-head">${escape(hall)} <span class="count">${hallTotal}</span></div>
+      ${floorBlocks}
+    </div>`;
+  }).join('');
+
+  // Bed-by-bed editable table (if not approved)
+  const bedRows = a.map((x, idx) => {
+    const { catSel, genderSel } = assignmentControls(x, idx);
     return `<tr>
-      <td>${escape(x.sheet)}</td>
+      <td>${escape(x.hall || x.sheet || '')}</td>
+      <td>${escape(x.floor || '')}</td>
       <td>${escape(x.room_id || '')}</td>
       <td>${escape(x.team || x.account || '')}</td>
       <td>${catSel}</td>
@@ -547,11 +589,18 @@ function renderReview(p) {
       </div>
     </details>
 
+    <details class="vs-disclosure" open>
+      <summary>Grouped Bed-by-bed Review${p.is_approved ? '' : ' (editable)'} · ${a.length} beds</summary>
+      <div>
+        <div class="vs-placement-grid">${groupedBedPanels || '<div class="vs-alert warn">No bed assignments to review yet.</div>'}</div>
+      </div>
+    </details>
+
     <details class="vs-disclosure">
       <summary>Bed-by-bed Review${p.is_approved ? '' : ' (editable)'} · ${a.length} beds</summary>
       <div style="max-height: 600px; overflow:auto;">
         <table class="vs-table zebra">
-          <thead><tr><th>Hall</th><th>Room</th><th>Team</th><th>Role</th><th>Gender</th></tr></thead>
+          <thead><tr><th>Hall</th><th>Floor</th><th>Room</th><th>Team</th><th>Role</th><th>Gender</th></tr></thead>
           <tbody>${bedRows}</tbody>
         </table>
       </div>

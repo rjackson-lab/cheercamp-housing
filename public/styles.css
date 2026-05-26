@@ -1002,6 +1002,51 @@ a:hover { text-decoration: underline; }
 }
 .vs-floor .team-row .team-name { color: var(--vs-text); }
 .vs-floor .team-row .team-count { color: var(--vs-text-2, #4F5A70); font-variant-numeric: tabular-nums; margin-left: 12px; }
+.vs-floor .floor-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.vs-floor .floor-head span {
+  font-weight: 600;
+  color: var(--vs-text-mute, #8A93A4);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.vs-bed-list {
+  display: grid;
+  gap: 4px;
+}
+.vs-bed-row {
+  display: grid;
+  grid-template-columns: minmax(52px, .7fr) minmax(120px, 1.4fr) minmax(88px, .9fr) minmax(62px, .6fr);
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(200, 210, 225, 0.65);
+  font-size: 12px;
+}
+.vs-bed-row:last-child { border-bottom: none; }
+.vs-bed-row .room {
+  color: var(--vs-text-2, #4F5A70);
+  font-variant-numeric: tabular-nums;
+}
+.vs-bed-row .team {
+  color: var(--vs-text);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-bed-row .role, .vs-bed-row .gender {
+  min-width: 0;
+}
+.vs-bed-row .vs-mini-sel {
+  width: 100%;
+}
+@media (max-width: 700px) {
+  .vs-bed-row { grid-template-columns: 1fr 1fr; }
+}
 .vs-two-col {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
