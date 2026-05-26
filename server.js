@@ -508,12 +508,46 @@ function assignmentCategory(label) {
   return cats.find(cat => String(label || '').endsWith(` ${cat}`)) || 'Other';
 }
 
-function enrichAssignments(assignments, locationId) {
+const TEAM_NAME_STRIP = /\s+(Varsity|JV|Junior Varsity|High School|HS|Middle School|MS|Cheer|Cheerleading|Spirit|Squad|Team)$/ig;
+
+function shortTeamName(name) {
+  return String(name || '').replace(TEAM_NAME_STRIP, '').replace(/\s+/g, ' ').trim() || String(name || '').trim();
+}
+
+function labelToAccount(label, accounts) {
+  const value = String(label || '');
+  for (const acct of accounts || []) {
+    if (value === acct) return acct;
+    if (value.startsWith(`${shortTeamName(acct)} `)) return acct;
+  }
+  return value.replace(/ (Athlete|Coach|Chaperone|Staff|Other)$/, '') || null;
+}
+
+function rawAccountsForPlacement(placement) {
+  if (!placement) return [];
+  const raw = placement.session_id
+    ? db.prepare("SELECT blob FROM location_files WHERE session_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(placement.session_id)
+    : db.prepare("SELECT blob FROM location_files WHERE location_id=? AND session_id IS NULL AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(placement.location_id)
+      || db.prepare("SELECT blob FROM location_files WHERE location_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(placement.location_id);
+  if (!raw) return [];
+  try {
+    const XLSX = require('xlsx');
+    const wb = XLSX.read(raw.blob, { type: 'buffer' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    return [...new Set(rows.map(r => String(r.Account || '').trim()).filter(Boolean))];
+  } catch (e) {
+    console.warn('raw account enrichment skipped:', e.message);
+    return [];
+  }
+}
+
+function enrichAssignments(assignments, placement) {
   const latestBlank = db.prepare(`
     SELECT blob FROM location_files
     WHERE location_id=? AND kind='blank'
     ORDER BY uploaded_at DESC LIMIT 1
-  `).get(locationId);
+  `).get(placement.location_id);
+  const accounts = rawAccountsForPlacement(placement);
   let rooms = {};
   if (latestBlank) {
     try {
@@ -530,10 +564,12 @@ function enrichAssignments(assignments, locationId) {
   }
   return (assignments || []).map((a, i) => {
     const room = rooms[`${a.sheet}|${a.row}`] || {};
+    const account = a.account || labelToAccount(a.team || a.label || '', accounts);
     return {
       ...a,
       _idx: i,
-      team: a.team || a.label || '',
+      account: account || '',
+      team: account || a.team || a.label || '',
       category: a.category || assignmentCategory(a.label),
       room_id: a.room_id || room.room_id || '',
       floor: a.floor || room.floor || '',
@@ -553,7 +589,7 @@ app.get('/api/locations/:id/placement', requireAuth, (req, res) => {
       ...p,
       warnings: JSON.parse(p.warnings_json || '[]'),
       compliance: JSON.parse(p.compliance_json || '{}'),
-      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), id)
+      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p)
     }
   });
 });
@@ -568,7 +604,7 @@ app.get('/api/sessions/:id/placement', requireAuth, (req, res) => {
       ...p,
       warnings: JSON.parse(p.warnings_json || '[]'),
       compliance: JSON.parse(p.compliance_json || '{}'),
-      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p.location_id)
+      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p)
     }
   });
 });
