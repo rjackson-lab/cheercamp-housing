@@ -358,14 +358,19 @@ async function loadPlacement() {
 function renderReview(p) {
   const c = p.compliance || {};
   const assignments = p.assignments || [];
+  const roster = p.roster_summary || {};
+  const rosterGenders = roster.gender_counts || {};
   const total = p.total_beds || 0;
   const placed = p.placed || 0;
   const a = assignments;
 
   // Stats
-  const female = a.filter(x => x.gender === 'Female').length;
-  const male = a.filter(x => x.gender === 'Male').length;
-  const teams = new Set(a.map(x => x.account)).size;
+  const assignedFemale = a.filter(x => x.gender === 'Female').length;
+  const assignedMale = a.filter(x => x.gender === 'Male').length;
+  const assignedTeams = new Set(a.map(x => x.account).filter(Boolean)).size;
+  const female = rosterGenders.Female ?? assignedFemale;
+  const male = rosterGenders.Male ?? assignedMale;
+  const teams = roster.team_count ?? assignedTeams;
 
   // Compliance categories
   const cats = [

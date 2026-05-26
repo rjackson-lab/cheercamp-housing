@@ -523,31 +523,55 @@ function labelToAccount(label, accounts) {
   return value.replace(/ (Athlete|Coach|Chaperone|Staff|Other)$/, '') || null;
 }
 
-function rawAccountsForPlacement(placement) {
-  if (!placement) return [];
+function rawRosterForPlacement(placement) {
+  const empty = {
+    accounts: [],
+    summary: {
+      total_beds: 0,
+      team_count: 0,
+      gender_counts: { Female: 0, Male: 0, Unknown: 0 }
+    }
+  };
+  if (!placement) return empty;
   const raw = placement.session_id
     ? db.prepare("SELECT blob FROM location_files WHERE session_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(placement.session_id)
     : db.prepare("SELECT blob FROM location_files WHERE location_id=? AND session_id IS NULL AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(placement.location_id)
       || db.prepare("SELECT blob FROM location_files WHERE location_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(placement.location_id);
-  if (!raw) return [];
+  if (!raw) return empty;
   try {
     const XLSX = require('xlsx');
+    const coreSrc = fs.readFileSync(path.join(__dirname, 'lib', '_placement_core.js'), 'utf8');
+    const core = (new Function('XLSX', 'JSZip', coreSrc + '\nreturn { ingestRaw };'))(XLSX, require('jszip'));
     const wb = XLSX.read(raw.blob, { type: 'buffer' });
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-    return [...new Set(rows.map(r => String(r.Account || '').trim()).filter(Boolean))];
+    const beds = core.ingestRaw(wb);
+    const accounts = [...new Set(beds.map(b => String(b.account || '').trim()).filter(Boolean))];
+    const genderCounts = { Female: 0, Male: 0, Unknown: 0 };
+    for (const bed of beds) {
+      const gender = String(bed.gender || '').trim().toLowerCase();
+      if (gender.startsWith('f')) genderCounts.Female++;
+      else if (gender.startsWith('m')) genderCounts.Male++;
+      else genderCounts.Unknown++;
+    }
+    return {
+      accounts,
+      summary: {
+        total_beds: beds.length,
+        team_count: accounts.length,
+        gender_counts: genderCounts
+      }
+    };
   } catch (e) {
-    console.warn('raw account enrichment skipped:', e.message);
-    return [];
+    console.warn('raw roster enrichment skipped:', e.message);
+    return empty;
   }
 }
 
-function enrichAssignments(assignments, placement) {
+function enrichAssignments(assignments, placement, accounts = []) {
   const latestBlank = db.prepare(`
     SELECT blob FROM location_files
     WHERE location_id=? AND kind='blank'
     ORDER BY uploaded_at DESC LIMIT 1
   `).get(placement.location_id);
-  const accounts = rawAccountsForPlacement(placement);
   let rooms = {};
   if (latestBlank) {
     try {
@@ -584,12 +608,14 @@ app.get('/api/locations/:id/placement', requireAuth, (req, res) => {
   if (!loc) return res.status(404).json({ error: 'not found' });
   const p = db.prepare(`SELECT * FROM placements WHERE location_id=? ORDER BY run_at DESC LIMIT 1`).get(id);
   if (!p) return res.json({ placement: null });
+  const roster = rawRosterForPlacement(p);
   res.json({
     placement: {
       ...p,
       warnings: JSON.parse(p.warnings_json || '[]'),
       compliance: JSON.parse(p.compliance_json || '{}'),
-      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p)
+      roster_summary: roster.summary,
+      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p, roster.accounts)
     }
   });
 });
@@ -599,12 +625,14 @@ app.get('/api/sessions/:id/placement', requireAuth, (req, res) => {
   if (!sessionRow) return res.status(404).json({ error: 'not found' });
   const p = db.prepare('SELECT * FROM placements WHERE session_id=? ORDER BY run_at DESC LIMIT 1').get(sessionRow.id);
   if (!p) return res.json({ placement: null });
+  const roster = rawRosterForPlacement(p);
   res.json({
     placement: {
       ...p,
       warnings: JSON.parse(p.warnings_json || '[]'),
       compliance: JSON.parse(p.compliance_json || '{}'),
-      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p)
+      roster_summary: roster.summary,
+      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p, roster.accounts)
     }
   });
 });
