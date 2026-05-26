@@ -589,7 +589,7 @@ function renderReview(p) {
       </div>
     </details>
 
-    <details class="vs-disclosure" open>
+    <details class="vs-disclosure">
       <summary>Grouped Bed-by-bed Review${p.is_approved ? '' : ' (editable)'} · ${a.length} beds</summary>
       <div>
         <div class="vs-placement-grid">${groupedBedPanels || '<div class="vs-alert warn">No bed assignments to review yet.</div>'}</div>
