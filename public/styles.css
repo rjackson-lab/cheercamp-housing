@@ -1169,3 +1169,43 @@ a:hover { text-decoration: underline; }
   display: flex; justify-content: flex-end; gap: 8px;
   margin-top: 18px;
 }
+
+/* ============================================================
+   "Submit a Rooming List" tab — embeds operations.html via iframe
+   ============================================================ */
+
+/* Iframe container: break out of the .vs-page max-width and padding so the
+   embedded operations view fills the viewport width. */
+.vs-rooming-tab {
+  margin: -32px -24px 0;
+  padding: 0;
+  /* Keep .hidden override working from .vs-page descendant selectors */
+}
+.vs-rooming-tab.hidden { display: none; }
+
+.vs-rooming-frame {
+  display: block;
+  width: 100%;
+  /* Viewport minus admin header (56px) and tab nav (~48px) */
+  height: calc(100vh - 104px);
+  border: 0;
+  background: var(--vs-surface);
+}
+
+/* When operations.html is embedded, the parent dashboard supplies its own
+   header and profile dropdown; hide the redundant chrome inside the iframe. */
+body.vs-embedded .vs-ops-header { display: none; }
+body.vs-embedded .vs-ops-footer { display: none; }
+body.vs-embedded .vs-stepnav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+body.vs-embedded .vs-ops-main {
+  padding-top: 16px;
+}
+
+@media (max-width: 700px) {
+  .vs-rooming-tab { margin: -16px -12px 0; }
+  .vs-rooming-frame { height: calc(100vh - 96px); }
+}

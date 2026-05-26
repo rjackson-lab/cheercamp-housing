@@ -22,11 +22,18 @@ async function bootstrap() {
   await Promise.all([loadLocations(), loadSessions(), loadAdminPanel()]);
 }
 
+let roomingFrameLoaded = false;
 function switchTab(name) {
   document.querySelectorAll('.vs-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   $('tab-locations').classList.toggle('hidden', name !== 'locations');
+  $('tab-rooming').classList.toggle('hidden', name !== 'rooming');
   $('tab-sessions').classList.toggle('hidden', name !== 'sessions');
   $('tab-admin').classList.toggle('hidden', name !== 'admin');
+  // Lazy-load the rooming iframe the first time the tab is opened
+  if (name === 'rooming' && !roomingFrameLoaded) {
+    $('rooming-frame').src = '/operations.html?embedded=1';
+    roomingFrameLoaded = true;
+  }
 }
 
 async function loadLocations() {

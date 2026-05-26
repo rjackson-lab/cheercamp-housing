@@ -23,6 +23,12 @@ const state = {
 const urlMatch = window.location.pathname.match(/^\/session\/(\d+)/);
 const initialSessionId = urlMatch ? parseInt(urlMatch[1], 10) : null;
 
+// Detect if we're loaded inside the admin dashboard's "Submit a Rooming List" tab.
+// When embedded, we hide the duplicate profile dropdown (the parent dashboard
+// already provides one) and tag the body so CSS can compact the chrome.
+const isEmbedded = new URLSearchParams(window.location.search).get('embedded') === '1';
+if (isEmbedded) document.body.classList.add('vs-embedded');
+
 /* =====================================================
    Bootstrap
    ===================================================== */
@@ -31,7 +37,9 @@ async function bootstrap() {
   const meRes = await api('/api/me');
   if (!meRes) return;
   state.me = (await meRes.json()).user;
-  ProfileDropdown.mount($('vs-profile-mount'), state.me);
+  // Only mount the profile dropdown when standalone — the parent dashboard
+  // already shows one when this view is embedded.
+  if (!isEmbedded) ProfileDropdown.mount($('vs-profile-mount'), state.me);
 
   // Load venues for the picker
   await loadVenues();

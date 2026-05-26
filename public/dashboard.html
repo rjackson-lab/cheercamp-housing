@@ -22,6 +22,7 @@
 <nav class="vs-tab-nav">
   <div class="vs-tab-nav-inner">
     <button class="vs-tab active" data-tab="locations">Locations</button>
+    <button class="vs-tab" data-tab="rooming">Submit a Rooming List</button>
     <button class="vs-tab" data-tab="sessions">Sessions</button>
     <button class="vs-tab" data-tab="admin">Admin Tools <span id="admin-badge" class="vs-tab-badge hidden">0</span></button>
   </div>
@@ -44,6 +45,14 @@
 
     <div id="location-content"></div>
 
+  </section>
+
+  <!-- ===== SUBMIT A ROOMING LIST TAB (embeds operations.html) ===== -->
+  <section id="tab-rooming" class="hidden vs-rooming-tab">
+    <iframe id="rooming-frame"
+            title="Submit a Rooming List"
+            class="vs-rooming-frame"
+            src="about:blank"></iframe>
   </section>
 
   <!-- ===== SESSIONS TAB ===== -->
