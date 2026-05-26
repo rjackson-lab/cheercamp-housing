@@ -268,6 +268,7 @@ async function uploadRaw(file) {
   $('run-btn').disabled = false;
   setStepStatus('step-review', 'status-review', 'ready to run', 'enable');
   syncStepNav();
+  await runPlacement();
 }
 
 /* =====================================================
@@ -360,9 +361,12 @@ function renderReview(p) {
   const assignments = p.assignments || [];
   const roster = p.roster_summary || {};
   const rosterGenders = roster.gender_counts || {};
+  const templateHalls = ((p.template_summary || {}).halls || []);
   const total = p.total_beds || 0;
   const placed = p.placed || 0;
   const a = assignments;
+  const capacity = templateHalls.reduce((s, h) => s + (h.capacity || 0), 0);
+  const capacityFree = capacity ? Math.max(0, capacity - placed) : null;
 
   // Stats
   const assignedFemale = a.filter(x => x.gender === 'Female').length;
@@ -371,6 +375,29 @@ function renderReview(p) {
   const female = rosterGenders.Female ?? assignedFemale;
   const male = rosterGenders.Male ?? assignedMale;
   const teams = roster.team_count ?? assignedTeams;
+  const assignedByHallFloor = {};
+  for (const x of a) {
+    const hall = x.sheet || '';
+    const floor = x.floor != null ? String(x.floor) : '';
+    if (!assignedByHallFloor[hall]) assignedByHallFloor[hall] = {};
+    assignedByHallFloor[hall][floor] = (assignedByHallFloor[hall][floor] || 0) + 1;
+  }
+  const capacityRows = templateHalls.map(h => {
+    const assigned = Object.values(assignedByHallFloor[h.name] || {}).reduce((s, n) => s + n, 0);
+    const floorUsage = Object.entries(h.floors || {})
+      .sort((a,b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+      .map(([fl, cap]) => `F${escape(fl)}: ${assignedByHallFloor[h.name]?.[fl] || 0}/${cap}`)
+      .join(' ');
+    return `<tr>
+      <td><strong>${escape(h.name)}</strong>${h.is_staff_hall ? ' <span class="badge warn">staff</span>' : ''}</td>
+      <td>${Object.keys(h.floors || {}).length}</td>
+      <td>${h.capacity || 0}</td>
+      <td>${assigned}</td>
+      <td>${Math.max(0, (h.capacity || 0) - assigned)}</td>
+      <td>${floorUsage}</td>
+      <td><span class="badge ${assigned > (h.capacity || 0) ? 'danger' : 'ok'}">${assigned > (h.capacity || 0) ? 'Over' : 'OK'}</span></td>
+    </tr>`;
+  }).join('');
 
   // Compliance categories
   const cats = [
@@ -470,10 +497,21 @@ function renderReview(p) {
       <div class="vs-stat"><div class="label">Teams</div><div class="value">${teams}</div></div>
       <div class="vs-stat"><div class="label">Total Beds</div><div class="value">${total}</div></div>
       <div class="vs-stat"><div class="label">Assigned</div><div class="value ${placed===total?'ok':'warn'}">${placed}</div><div class="sub">of ${total}</div></div>
+      ${capacityFree == null ? '' : `<div class="vs-stat"><div class="label">Capacity Free</div><div class="value">${capacityFree}</div><div class="sub">of ${capacity}</div></div>`}
       <div class="vs-stat"><div class="label">Female</div><div class="value">${female}</div></div>
       <div class="vs-stat"><div class="label">Male</div><div class="value">${male}</div></div>
       <div class="vs-stat"><div class="label">Status</div><div class="value">${p.is_approved ? '✓ Approved' : 'Draft'}</div></div>
     </div>
+
+    ${capacityRows ? `<div class="vs-panel" style="margin-bottom: 16px;">
+      <div class="vs-panel-head"><h2>Dorm &amp; Floor Capacity</h2></div>
+      <div class="vs-panel-body no-pad">
+        <table class="vs-table zebra">
+          <thead><tr><th>Hall</th><th>Floors</th><th>Capacity</th><th>Assigned</th><th>Remaining</th><th>Per-Floor Usage</th><th>Status</th></tr></thead>
+          <tbody>${capacityRows}</tbody>
+        </table>
+      </div>
+    </div>` : ''}
 
     <div class="vs-panel" style="margin-bottom: 16px;">
       <div class="vs-panel-head"><h2>Compliance Report</h2>
@@ -487,11 +525,19 @@ function renderReview(p) {
     </div>
 
     <div class="vs-panel" style="margin-bottom: 16px;">
-      <div class="vs-panel-head"><h2>Placement by Hall</h2></div>
+      <div class="vs-panel-head"><h2>Placeholder Assignments — Ready for Approval</h2></div>
       <div class="vs-panel-body">
-        <div class="vs-placement-grid">${hallPanels}</div>
+        <div class="vs-alert info">Team placeholders only. Participant names are written after approval when you finalize with names.</div>
+        <div class="vs-placement-grid">${hallPanels || '<div class="vs-alert warn">No placeholder assignments were created. Check that the location template has RoomID, Floor, and Group/School columns with usable room rows.</div>'}</div>
       </div>
     </div>
+
+    <details class="vs-disclosure">
+      <summary>Team Headcount Breakdown · ${teams} teams</summary>
+      <div class="vs-two-col">
+        ${(roster.by_team || []).map(([team, n]) => `<div class="team-row"><span class="team-name">${escape(team)}</span><span class="team-count">${n}</span></div>`).join('')}
+      </div>
+    </details>
 
     <details class="vs-disclosure">
       <summary>Bed-by-bed Review${p.is_approved ? '' : ' (editable)'} · ${a.length} beds</summary>

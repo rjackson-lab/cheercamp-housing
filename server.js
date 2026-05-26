@@ -529,6 +529,7 @@ function rawRosterForPlacement(placement) {
     summary: {
       total_beds: 0,
       team_count: 0,
+      by_team: [],
       gender_counts: { Female: 0, Male: 0, Unknown: 0 }
     }
   };
@@ -546,7 +547,10 @@ function rawRosterForPlacement(placement) {
     const beds = core.ingestRaw(wb);
     const accounts = [...new Set(beds.map(b => String(b.account || '').trim()).filter(Boolean))];
     const genderCounts = { Female: 0, Male: 0, Unknown: 0 };
+    const byTeam = {};
     for (const bed of beds) {
+      const account = String(bed.account || '').trim();
+      if (account) byTeam[account] = (byTeam[account] || 0) + 1;
       const gender = String(bed.gender || '').trim().toLowerCase();
       if (gender.startsWith('f')) genderCounts.Female++;
       else if (gender.startsWith('m')) genderCounts.Male++;
@@ -557,6 +561,7 @@ function rawRosterForPlacement(placement) {
       summary: {
         total_beds: beds.length,
         team_count: accounts.length,
+        by_team: Object.entries(byTeam).sort((a, b) => b[1] - a[1]),
         gender_counts: genderCounts
       }
     };
@@ -566,13 +571,13 @@ function rawRosterForPlacement(placement) {
   }
 }
 
-function enrichAssignments(assignments, placement, accounts = []) {
+function templateInventoryForLocation(locationId) {
   const latestBlank = db.prepare(`
     SELECT blob FROM location_files
     WHERE location_id=? AND kind='blank'
     ORDER BY uploaded_at DESC LIMIT 1
-  `).get(placement.location_id);
-  let rooms = {};
+  `).get(locationId);
+  const inventory = { rooms: {}, halls: [] };
   if (latestBlank) {
     try {
       const XLSX = require('xlsx');
@@ -580,12 +585,30 @@ function enrichAssignments(assignments, placement, accounts = []) {
       const core = (new Function('XLSX', 'JSZip', coreSrc + '\nreturn { parseTemplate };'))(XLSX, require('jszip'));
       const wb = XLSX.read(latestBlank.blob, { type: 'buffer', cellStyles: true });
       for (const hall of core.parseTemplate(wb, wb)) {
-        for (const room of hall.rooms) rooms[`${room.sheet}|${room.row}`] = room;
+        const usableRooms = hall.rooms.filter(r => !r.is_ra && !r.is_excluded);
+        const floors = {};
+        for (const room of usableRooms) {
+          inventory.rooms[`${room.sheet}|${room.row}`] = room;
+          const floor = room.floor == null ? '' : String(room.floor);
+          floors[floor] = (floors[floor] || 0) + 1;
+        }
+        inventory.halls.push({
+          name: hall.name,
+          is_staff_hall: !!hall.is_staff_hall,
+          capacity: usableRooms.length,
+          floors
+        });
       }
     } catch (e) {
-      console.warn('assignment enrichment skipped:', e.message);
+      console.warn('template inventory skipped:', e.message);
     }
   }
+  return inventory;
+}
+
+function enrichAssignments(assignments, placement, accounts = [], inventory = null) {
+  const templateInventory = inventory || templateInventoryForLocation(placement.location_id);
+  const rooms = templateInventory.rooms || {};
   return (assignments || []).map((a, i) => {
     const room = rooms[`${a.sheet}|${a.row}`] || {};
     const account = a.account || labelToAccount(a.team || a.label || '', accounts);
@@ -609,13 +632,15 @@ app.get('/api/locations/:id/placement', requireAuth, (req, res) => {
   const p = db.prepare(`SELECT * FROM placements WHERE location_id=? ORDER BY run_at DESC LIMIT 1`).get(id);
   if (!p) return res.json({ placement: null });
   const roster = rawRosterForPlacement(p);
+  const inventory = templateInventoryForLocation(p.location_id);
   res.json({
     placement: {
       ...p,
       warnings: JSON.parse(p.warnings_json || '[]'),
       compliance: JSON.parse(p.compliance_json || '{}'),
       roster_summary: roster.summary,
-      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p, roster.accounts)
+      template_summary: { halls: inventory.halls },
+      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p, roster.accounts, inventory)
     }
   });
 });
@@ -626,13 +651,15 @@ app.get('/api/sessions/:id/placement', requireAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM placements WHERE session_id=? ORDER BY run_at DESC LIMIT 1').get(sessionRow.id);
   if (!p) return res.json({ placement: null });
   const roster = rawRosterForPlacement(p);
+  const inventory = templateInventoryForLocation(p.location_id);
   res.json({
     placement: {
       ...p,
       warnings: JSON.parse(p.warnings_json || '[]'),
       compliance: JSON.parse(p.compliance_json || '{}'),
       roster_summary: roster.summary,
-      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p, roster.accounts)
+      template_summary: { halls: inventory.halls },
+      assignments: enrichAssignments(JSON.parse(p.assignments_json || '[]'), p, roster.accounts, inventory)
     }
   });
 });

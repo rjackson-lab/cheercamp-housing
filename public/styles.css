@@ -1002,6 +1002,22 @@ a:hover { text-decoration: underline; }
 }
 .vs-floor .team-row .team-name { color: var(--vs-text); }
 .vs-floor .team-row .team-count { color: var(--vs-text-2, #4F5A70); font-variant-numeric: tabular-nums; margin-left: 12px; }
+.vs-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+}
+.vs-two-col .team-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--vs-border);
+  font-size: 13px;
+}
+.vs-two-col .team-name { color: var(--vs-text); }
+.vs-two-col .team-count { color: var(--vs-text-2, #4F5A70); font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) { .vs-two-col { grid-template-columns: 1fr; } }
 
 /* Disclosure */
 .vs-disclosure { margin: 8px 0; }
