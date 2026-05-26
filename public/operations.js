@@ -375,6 +375,12 @@ function renderReview(p) {
   const female = rosterGenders.Female ?? assignedFemale;
   const male = rosterGenders.Male ?? assignedMale;
   const teams = roster.team_count ?? assignedTeams;
+  const displayAssignmentLabel = (x) => {
+    const team = x.team || x.account || '';
+    const category = x.category || '';
+    if (team && category && !String(team).endsWith(` ${category}`)) return `${team} ${category}`;
+    return x.label || team || category || 'Unassigned';
+  };
   const assignedByHallFloor = {};
   for (const x of a) {
     const hall = x.sheet || '';
@@ -427,7 +433,8 @@ function renderReview(p) {
     if (!bySheetFloor[x.sheet]) bySheetFloor[x.sheet] = {};
     const fl = x.floor != null ? String(x.floor) : '?';
     if (!bySheetFloor[x.sheet][fl]) bySheetFloor[x.sheet][fl] = {};
-    bySheetFloor[x.sheet][fl][x.label] = (bySheetFloor[x.sheet][fl][x.label] || 0) + 1;
+    const label = displayAssignmentLabel(x);
+    bySheetFloor[x.sheet][fl][label] = (bySheetFloor[x.sheet][fl][label] || 0) + 1;
   }
   const hallPanels = Object.entries(bySheetFloor).map(([hall, floors]) => {
     const totalBeds = Object.values(floors).reduce((s, f) => s + Object.values(f).reduce((a,b)=>a+b,0), 0);
@@ -462,7 +469,7 @@ function renderReview(p) {
     return `<tr>
       <td>${escape(x.sheet)}</td>
       <td>${escape(x.room_id || '')}</td>
-      <td>${escape(x.team || '')}</td>
+      <td>${escape(x.team || x.account || '')}</td>
       <td>${catSel}</td>
       <td>${genderSel}</td>
     </tr>`;
