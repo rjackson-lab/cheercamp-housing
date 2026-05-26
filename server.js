@@ -171,8 +171,8 @@ app.patch('/api/profile', requireAuth, (req, res) => {
 });
 
 app.post('/api/password/change', requireAuth, (req, res) => {
-  const currentPassword = String((req.body || {}).currentPassword || '');
-  const newPassword = String((req.body || {}).newPassword || '');
+  const currentPassword = String((req.body || {}).currentPassword || (req.body || {}).current || '');
+  const newPassword = String((req.body || {}).newPassword || (req.body || {}).next || '');
   if (newPassword.length < 8) return res.status(400).json({ error: 'new password must be 8+ characters' });
   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.session.userId);
   if (!u || !bcrypt.compareSync(currentPassword, u.password_hash)) return res.status(401).json({ error: 'current password is incorrect' });

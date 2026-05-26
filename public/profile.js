@@ -182,7 +182,7 @@
         const r = await fetch('/api/password/change', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ current, next })
+          body: JSON.stringify({ currentPassword: current, newPassword: next })
         });
         const d = await r.json();
         if (!r.ok) {
