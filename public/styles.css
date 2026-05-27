@@ -1019,7 +1019,7 @@ a:hover { text-decoration: underline; }
 }
 .vs-bed-row {
   display: grid;
-  grid-template-columns: minmax(52px, .7fr) minmax(120px, 1.4fr) minmax(88px, .9fr) minmax(62px, .6fr);
+  grid-template-columns: minmax(52px, .5fr) minmax(180px, 2fr);
   align-items: center;
   gap: 8px;
   padding: 4px 0;
@@ -1031,18 +1031,16 @@ a:hover { text-decoration: underline; }
   color: var(--vs-text-2, #4F5A70);
   font-variant-numeric: tabular-nums;
 }
-.vs-bed-row .team {
+.vs-bed-row .assignment {
   color: var(--vs-text);
   font-weight: 600;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.vs-bed-row .role, .vs-bed-row .gender {
   min-width: 0;
 }
 .vs-bed-row .vs-mini-sel {
   width: 100%;
+}
+.vs-assignment-sel {
+  max-width: 100%;
 }
 @media (max-width: 700px) {
   .vs-bed-row { grid-template-columns: 1fr 1fr; }

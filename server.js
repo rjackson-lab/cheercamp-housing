@@ -364,13 +364,14 @@ app.get('/api/sessions', requireAuth, (req, res) => {
 app.post('/api/sessions', requireAuth, (req, res) => {
   const locationId = parseInt((req.body || {}).location_id);
   const name = String((req.body || {}).name || '').trim();
+  const conditions = String((req.body || {}).conditions || '').trim();
   const loc = db.prepare('SELECT * FROM locations WHERE id=?').get(locationId);
   if (!loc) return res.status(404).json({ error: 'location not found' });
   const t = Date.now();
   const info = db.prepare(`
-    INSERT INTO sessions (name, location_id, created_by, created_at, updated_at, status)
-    VALUES (?, ?, ?, ?, ?, 'not_started')
-  `).run(name || null, locationId, req.session.userId, t, t);
+    INSERT INTO sessions (name, location_id, created_by, created_at, updated_at, status, notes)
+    VALUES (?, ?, ?, ?, ?, 'not_started', ?)
+  `).run(name || null, locationId, req.session.userId, t, t, conditions || null);
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 
@@ -400,12 +401,13 @@ app.post('/api/sessions/:id/raw', requireAuth, upload.single('file'), (req, res)
   const sessionRow = getAccessibleSession(req, parseInt(req.params.id));
   if (!sessionRow) return res.status(404).json({ error: 'not found' });
   if (!req.file) return res.status(400).json({ error: 'no file' });
+  const conditions = String((req.body || {}).conditions || '').trim();
   db.prepare("DELETE FROM location_files WHERE session_id=? AND kind='raw'").run(sessionRow.id);
   db.prepare(`
     INSERT INTO location_files (location_id, session_id, kind, filename, mime_type, size_bytes, blob, uploaded_by, uploaded_at)
     VALUES (?, ?, 'raw', ?, ?, ?, ?, ?, ?)
   `).run(sessionRow.location_id, sessionRow.id, req.file.originalname, req.file.mimetype, req.file.size, req.file.buffer, req.session.userId, Date.now());
-  db.prepare("UPDATE sessions SET status='in_process', updated_at=? WHERE id=?").run(Date.now(), sessionRow.id);
+  db.prepare("UPDATE sessions SET status='in_process', notes=?, updated_at=? WHERE id=?").run(conditions || sessionRow.notes || null, Date.now(), sessionRow.id);
   res.json({ ok: true });
 });
 
@@ -474,7 +476,9 @@ app.post('/api/sessions/:id/run', requireAuth, async (req, res) => {
   if (!raw || !blank) return res.status(400).json({ error: 'raw roster and venue blank template required' });
 
   try {
-    const result = await runPlacement(raw.blob, blank.blob, ref ? ref.blob : null);
+    const conditions = String((req.body || {}).conditions || sessionRow.notes || '').trim();
+    db.prepare('UPDATE sessions SET notes=?, updated_at=? WHERE id=?').run(conditions || null, Date.now(), sessionRow.id);
+    const result = await runPlacement(raw.blob, blank.blob, ref ? ref.blob : null, { conditions });
     const status = computeStatus(result);
     const baseName = (sessionRow.name || sessionRow.location_name || 'Session').replace(/[^A-Za-z0-9_-]/g, '_');
     const outFilename = `${baseName}_Placeholder.xlsx`;
@@ -697,6 +701,16 @@ function updatePlacementAssignment(req, res) {
   if (!assignments[idx]) return res.status(404).json({ error: 'assignment not found' });
   const field = req.body.field;
   const value = String(req.body.value || '');
+  if (field === 'assignment') {
+    const [team, category, gender] = value.split('||').map(v => String(v || '').trim());
+    if (team && ['Athlete', 'Coach', 'Chaperone', 'Staff', 'Other'].includes(category) && ['Female', 'Male'].includes(gender)) {
+      assignments[idx].account = team;
+      assignments[idx].team = team;
+      assignments[idx].category = category;
+      assignments[idx].gender = gender;
+      assignments[idx].label = `${shortTeamName(team)} ${category}`;
+    }
+  }
   if (field === 'gender' && ['Female', 'Male'].includes(value)) assignments[idx].gender = value;
   if (field === 'category' && ['Athlete', 'Coach', 'Chaperone', 'Staff', 'Other'].includes(value)) {
     assignments[idx].category = value;

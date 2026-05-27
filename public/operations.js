@@ -160,6 +160,7 @@ $('new-session-btn').onclick = () => {
   state.selectedVenueId = null;
   $('location-info').innerHTML = '';
   $('session-name').value = '';
+  $('session-conditions').value = '';
   $('dropzone-default').style.display = 'block';
   $('dropzone-loaded').style.display = 'none';
   $('dropzone-loaded').innerHTML = '';
@@ -192,10 +193,11 @@ function updateCreateSessionState() {
 async function createSession() {
   if (!state.selectedVenueId) return;
   const name = $('session-name').value.trim() || `Session ${new Date().toLocaleDateString('en-US')}`;
+  const conditions = $('session-conditions').value.trim();
   const r = await api('/api/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, location_id: state.selectedVenueId })
+    body: JSON.stringify({ name, location_id: state.selectedVenueId, conditions })
   });
   if (!r) return;
   const d = await r.json();
@@ -247,6 +249,7 @@ async function handleFileSelect(file) {
 async function uploadRaw(file) {
   const fd = new FormData();
   fd.append('file', file);
+  fd.append('conditions', $('session-conditions').value.trim());
   $('upload-msg').innerHTML = '<div class="vs-alert info"><span class="vs-spinner"></span>Uploading roster…</div>';
   const r = await api(`/api/sessions/${state.sessionId}/raw`, { method: 'POST', body: fd });
   if (!r) return;
@@ -286,6 +289,7 @@ async function openSession(id) {
   $('ctx-session').textContent = session.name || 'Session';
   $('ctx-location').textContent = session.location_name || '—';
   $('session-name').value = session.name || '';
+  $('session-conditions').value = session.notes || '';
   // Show venue info if loaded; otherwise re-fetch
   let v = state.venues.find(x => x.id === session.location_id);
   if (!v) { await loadVenues(); v = state.venues.find(x => x.id === session.location_id); }
@@ -327,7 +331,11 @@ async function runPlacement() {
   $('run-btn').disabled = true; $('run-btn').textContent = 'Running…';
   setStepStatus('step-review', 'status-review', 'computing', 'enable');
   $('review-body').innerHTML = '<div class="vs-alert info"><span class="vs-spinner"></span>Running placement engine — analyzing teams, balancing pods, checking compliance…</div>';
-  const r = await api(`/api/sessions/${state.sessionId}/run`, { method: 'POST' });
+  const r = await api(`/api/sessions/${state.sessionId}/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conditions: $('session-conditions').value.trim() })
+  });
   if (!r) return;
   const d = await r.json();
   $('run-btn').disabled = false; $('run-btn').textContent = 'Re-run Placement';
@@ -452,21 +460,31 @@ function renderReview(p) {
     </div>`;
   }).join('');
 
+  const rosterTeams = (roster.by_team || []).map(([team]) => team).filter(Boolean);
   const assignmentControls = (x, idx) => {
     const editable = !p.is_approved;
-    const genderSel = editable
-      ? `<select data-idx="${idx}" data-field="gender" class="vs-mini-sel">
-           <option value="Female" ${x.gender === 'Female' ? 'selected':''}>F</option>
-           <option value="Male" ${x.gender === 'Male' ? 'selected':''}>M</option>
-         </select>`
-      : `<span class="badge ${x.gender === 'Male' ? 'warn' : ''}">${x.gender === 'Male' ? 'M' : 'F'}</span>`;
-    const catSel = editable
-      ? `<select data-idx="${idx}" data-field="category" class="vs-mini-sel">
-           ${['Athlete','Coach','Chaperone','Staff','Other'].map(c2 =>
-             `<option value="${c2}" ${x.category === c2 ? 'selected':''}>${c2}</option>`).join('')}
-         </select>`
-      : `<span class="badge">${escape(x.category)}</span>`;
-    return { catSel, genderSel };
+    const team = x.team || x.account || '';
+    const category = x.category || 'Other';
+    const gender = x.gender === 'Male' ? 'Male' : 'Female';
+    if (!editable) return { combo: `<span class="badge">${escape(`${team} / ${category} / ${gender}`)}</span>` };
+    const options = new Map();
+    const add = (t, c, g) => {
+      if (!t) return;
+      const value = `${t}||${c}||${g}`;
+      options.set(value, `${t} / ${c} / ${g === 'Male' ? 'M' : 'F'}`);
+    };
+    add(team, category, gender);
+    for (const t of rosterTeams) add(t, category, gender);
+    for (const c of ['Athlete','Coach','Chaperone','Staff','Other']) {
+      add(team, c, 'Female');
+      add(team, c, 'Male');
+    }
+    const current = `${team}||${category}||${gender}`;
+    return {
+      combo: `<select data-idx="${idx}" data-field="assignment" class="vs-mini-sel vs-assignment-sel">
+        ${[...options.entries()].map(([value, label]) => `<option value="${escape(value)}" ${value === current ? 'selected':''}>${escape(label)}</option>`).join('')}
+      </select>`
+    };
   };
 
   // Grouped bed-by-bed editable review, arranged like the approval breakdown.
@@ -486,12 +504,10 @@ function renderReview(p) {
         const bedItems = rows
           .sort((a,b) => String(a.room_id || '').localeCompare(String(b.room_id || ''), undefined, { numeric: true }))
           .map(x => {
-            const { catSel, genderSel } = assignmentControls(x, x._idx);
+            const { combo } = assignmentControls(x, x._idx);
             return `<div class="vs-bed-row">
               <span class="room">${escape(x.room_id || '')}</span>
-              <span class="team">${escape(x.team || x.account || '')}</span>
-              <span class="role">${catSel}</span>
-              <span class="gender">${genderSel}</span>
+              <span class="assignment">${combo}</span>
             </div>`;
           }).join('');
         return `<div class="vs-floor">
@@ -507,14 +523,12 @@ function renderReview(p) {
 
   // Bed-by-bed editable table (if not approved)
   const bedRows = a.map((x, idx) => {
-    const { catSel, genderSel } = assignmentControls(x, idx);
+    const { combo } = assignmentControls(x, idx);
     return `<tr>
       <td>${escape(x.hall || x.sheet || '')}</td>
       <td>${escape(x.floor || '')}</td>
       <td>${escape(x.room_id || '')}</td>
-      <td>${escape(x.team || x.account || '')}</td>
-      <td>${catSel}</td>
-      <td>${genderSel}</td>
+      <td>${combo}</td>
     </tr>`;
   }).join('');
 
@@ -600,7 +614,7 @@ function renderReview(p) {
       <summary>Bed-by-bed Review${p.is_approved ? '' : ' (editable)'} · ${a.length} beds</summary>
       <div style="max-height: 600px; overflow:auto;">
         <table class="vs-table zebra">
-          <thead><tr><th>Hall</th><th>Floor</th><th>Room</th><th>Team</th><th>Role</th><th>Gender</th></tr></thead>
+          <thead><tr><th>Hall</th><th>Floor</th><th>Room</th><th>Assignment</th></tr></thead>
           <tbody>${bedRows}</tbody>
         </table>
       </div>
