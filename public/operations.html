@@ -137,6 +137,27 @@
   Internal use only · server-side processing · workbook structure preserved byte-for-byte
 </footer>
 
+<!-- AI placement assistant -->
+<button id="vs-chat-fab" class="vs-chat-fab" type="button" hidden aria-label="Open placement assistant">
+  <span class="vs-chat-fab-icon">✦</span>
+  <span class="vs-chat-fab-label">Ask the Assistant</span>
+  <span id="vs-chat-fab-badge" class="vs-chat-fab-badge" hidden>0</span>
+</button>
+
+<aside id="vs-chat-drawer" class="vs-chat-drawer hidden" aria-hidden="true">
+  <div class="vs-chat-header">
+    <span>Placement Assistant</span>
+    <button id="vs-chat-close" class="vs-chat-close" type="button" aria-label="Close">✕</button>
+  </div>
+  <div id="vs-chat-messages" class="vs-chat-messages">
+    <div class="vs-chat-empty">Run a placement, then ask the assistant to review it or fix a problem.</div>
+  </div>
+  <div class="vs-chat-input">
+    <textarea id="vs-chat-text" rows="2" placeholder="e.g. Brentwood is split across two floors — fix it"></textarea>
+    <button id="vs-chat-send" class="vs-btn vs-btn-sm vs-btn-gold" type="button">Send</button>
+  </div>
+</aside>
+
 <script src="/profile.js"></script>
 <script src="/operations.js"></script>
 

@@ -177,6 +177,7 @@ $('new-session-btn').onclick = () => {
   $('run-btn').disabled = true;
   $('ctx-session').textContent = '—';
   $('ctx-location').textContent = '—';
+  Assistant.setPlacement(null);
   syncStepNav();
 };
 
@@ -358,6 +359,7 @@ async function loadPlacement() {
     placement.placed === placement.total_beds ? 'done' : 'warn');
   $('step-finalize').classList.remove('disabled');
   renderApprovalActions(placement);
+  Assistant.setPlacement(placement);
   syncStepNav();
 }
 
@@ -749,5 +751,163 @@ function syncStepNav() {
   else if (!finalized) { headerPill.className = 'vs-pill warn'; headerPill.innerHTML = '<span class="dot"></span>Approved – Pending Names'; }
   else { headerPill.className = 'vs-pill ok'; headerPill.innerHTML = '<span class="dot"></span>Complete'; }
 }
+
+/* =====================================================
+   AI Placement Assistant (chat bubble)
+   ===================================================== */
+const Assistant = (() => {
+  let placement = null;
+  let busy = false;
+  let opened = false;
+
+  const fab = () => $('vs-chat-fab');
+  const drawer = () => $('vs-chat-drawer');
+  const msgs = () => $('vs-chat-messages');
+
+  const BLOCKER_KEYS = ['occupancy_violations', 'bathroom_conflicts', 'staff_separation', 'room_school_mix'];
+
+  function problemSummary(p) {
+    const c = p.compliance || {};
+    const lines = [];
+    for (const k of BLOCKER_KEYS) (c[k] || []).forEach(x => lines.push(x));
+    return { count: lines.length, lines };
+  }
+
+  function setPlacement(p) {
+    placement = p;
+    if (!p) {
+      if (fab()) { fab().hidden = true; }
+      hide();
+      return;
+    }
+    if (fab()) fab().hidden = false;
+    // Badge = number of approval blockers the assistant can help resolve.
+    const { count } = problemSummary(p);
+    const badge = $('vs-chat-fab-badge');
+    if (badge) {
+      badge.hidden = count === 0;
+      badge.textContent = String(count);
+    }
+    const label = fab() && fab().querySelector('.vs-chat-fab-label');
+    if (label) label.textContent = count > 0 ? `Fix ${count} issue${count === 1 ? '' : 's'}` : 'Ask the Assistant';
+    if (opened) hydrate();
+  }
+
+  function bubbleHtml(role, text) {
+    return `<div class="vs-chat-msg vs-chat-${role === 'user' ? 'user' : 'assistant'}"><div class="vs-chat-bubble">${escape(text)}</div></div>`;
+  }
+
+  function describeChange(ch) {
+    const bed = (placement.assignments || []).find(a => a._idx === ch.idx) || {};
+    const where = `${bed.hall || ''} ${bed.room_id || ''}`.trim() || `bed #${ch.idx}`;
+    let what = '';
+    if (ch.field === 'assignment') { const [t, c, g] = ch.value.split('||'); what = `→ ${t} ${c} (${g})`; }
+    else if (ch.field === 'gender') what = `→ gender ${ch.value}`;
+    else if (ch.field === 'category') what = `→ role ${ch.value}`;
+    return `<b>${escape(where)}</b> ${escape(what)}${ch.reason ? ` — ${escape(ch.reason)}` : ''}`;
+  }
+
+  function renderChangeProposal(changes) {
+    const id = 'chg-' + Math.random().toString(36).slice(2, 8);
+    const html = `
+      <div class="vs-chat-changes" id="${id}">
+        <div class="vs-chat-changes-header">Proposed changes (${changes.length})</div>
+        <ul class="vs-chat-changes-list">${changes.map(c => `<li>${describeChange(c)}</li>`).join('')}</ul>
+        <div class="vs-chat-changes-actions">
+          <button class="vs-btn vs-btn-sm vs-btn-secondary" data-act="dismiss">Dismiss</button>
+          <button class="vs-btn vs-btn-sm vs-btn-gold" data-act="apply">${placement.is_approved ? 'Unapprove & Apply' : 'Apply Changes'}</button>
+        </div>
+      </div>`;
+    msgs().insertAdjacentHTML('beforeend', html);
+    const box = $(id);
+    box.querySelector('[data-act="dismiss"]').onclick = () => { box.remove(); };
+    box.querySelector('[data-act="apply"]').onclick = () => applyChanges(changes, box);
+    scrollDown();
+  }
+
+  async function applyChanges(changes, box) {
+    box.querySelectorAll('button').forEach(b => b.disabled = true);
+    // Locked placements must be unapproved before edits.
+    if (placement.is_approved) {
+      const u = await api(`/api/placements/${placement.id}/unapprove`, { method: 'POST' });
+      if (!u || !u.ok) { say('Could not unapprove the placement — apply cancelled.'); return; }
+    }
+    const r = await api(`/api/placements/${placement.id}/apply-changes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes })
+    });
+    const d = r ? await r.json() : {};
+    if (!r || !r.ok) { say(d.error || 'Apply failed.'); box.querySelectorAll('button').forEach(b => b.disabled = false); return; }
+    box.querySelector('.vs-chat-changes-actions').innerHTML = '<span class="vs-pill ok"><span class="dot"></span>Applied</span>';
+    // Reload the placement so the review table, blockers, and approve button refresh.
+    await loadPlacement();
+    const left = problemSummary(state.placement || placement).count;
+    say(`Applied ${d.applied} change${d.applied === 1 ? '' : 's'}. ${left === 0 ? 'No blocking issues remain — you can approve the placeholder.' : `${left} blocking issue${left === 1 ? '' : 's'} still remain.`}`);
+  }
+
+  function say(text) { msgs().insertAdjacentHTML('beforeend', bubbleHtml('assistant', text)); scrollDown(); }
+  function scrollDown() { msgs().scrollTop = msgs().scrollHeight; }
+
+  async function hydrate() {
+    if (!placement) return;
+    const r = await api(`/api/placements/${placement.id}/chat`);
+    const history = r && r.ok ? (await r.json()).messages || [] : [];
+    msgs().innerHTML = '';
+    if (!history.length) {
+      const { count, lines } = problemSummary(placement);
+      if (count > 0) {
+        say(`I found ${count} issue${count === 1 ? '' : 's'} blocking approval:\n• ${lines.slice(0, 6).join('\n• ')}${lines.length > 6 ? `\n…and ${lines.length - 6} more` : ''}\n\nTell me to fix one, or ask how you'd like it handled.`);
+      } else {
+        say('No blocking issues detected in this placement. Ask me to review anything, or describe a change you want.');
+      }
+      return;
+    }
+    history.forEach(m => msgs().insertAdjacentHTML('beforeend', bubbleHtml(m.role, m.content)));
+    scrollDown();
+  }
+
+  function show() { opened = true; drawer().classList.remove('hidden'); drawer().setAttribute('aria-hidden', 'false'); hydrate(); $('vs-chat-text').focus(); }
+  function hide() { opened = false; if (drawer()) { drawer().classList.add('hidden'); drawer().setAttribute('aria-hidden', 'true'); } }
+
+  async function send() {
+    if (busy || !placement) return;
+    const ta = $('vs-chat-text');
+    const message = ta.value.trim();
+    if (!message) return;
+    ta.value = '';
+    msgs().insertAdjacentHTML('beforeend', bubbleHtml('user', message));
+    scrollDown();
+    busy = true;
+    const thinking = document.createElement('div');
+    thinking.className = 'vs-chat-thinking';
+    thinking.textContent = 'Thinking…';
+    msgs().appendChild(thinking);
+    scrollDown();
+    const r = await api(`/api/placements/${placement.id}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    });
+    thinking.remove();
+    busy = false;
+    const d = r ? await r.json() : {};
+    if (!r || !r.ok) { say(d.error || 'The assistant is unavailable right now.'); return; }
+    say(d.reply || 'Done.');
+    if (Array.isArray(d.changes) && d.changes.length) renderChangeProposal(d.changes);
+  }
+
+  function init() {
+    if (fab()) fab().onclick = show;
+    if ($('vs-chat-close')) $('vs-chat-close').onclick = hide;
+    if ($('vs-chat-send')) $('vs-chat-send').onclick = send;
+    const ta = $('vs-chat-text');
+    if (ta) ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  }
+
+  return { init, setPlacement };
+})();
+
+Assistant.init();
 
 bootstrap();

@@ -460,8 +460,56 @@ a:hover { text-decoration: underline; }
   justify-content: flex-end;
 }
 
+/* Launcher + close + thinking */
+.vs-chat-fab {
+  position: fixed;
+  right: 22px; bottom: 22px;
+  z-index: 190;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--vs-navy);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(20,33,61,0.28);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.vs-chat-fab:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(20,33,61,0.34); }
+.vs-chat-fab-icon { color: var(--vs-gold); font-size: 16px; line-height: 1; }
+.vs-chat-fab-badge {
+  background: var(--vs-gold);
+  color: var(--vs-navy);
+  font-size: 11px;
+  font-weight: 800;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.vs-chat-close {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.vs-chat-close:hover { opacity: 1; }
+.vs-chat-thinking { color: var(--vs-text-mute); font-size: 13px; font-style: italic; padding: 4px 2px; }
+
 @media (max-width: 640px) {
   .vs-chat-drawer { width: 100vw; }
+  .vs-chat-fab-label { display: none; }
 }
 
 /* ===== Tab nav (admin) ===== */

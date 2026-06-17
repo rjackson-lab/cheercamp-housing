@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 
 const db = require('./lib/db');
-const { runPlacement, computeStatus, finalizeWithNames } = require('./lib/placement');
+const { runPlacement, computeStatus, finalizeWithNames, recomputeAfterEdit } = require('./lib/placement');
 const { sendMail } = require('./lib/mail');
 const { askPlacementAssistant } = require('./lib/ai');
 
@@ -691,16 +691,12 @@ app.get('/api/sessions/:id/placement', requireAuth, (req, res) => {
   });
 });
 
-function updatePlacementAssignment(req, res) {
-  const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
-  if (!p) return res.status(404).json({ error: 'not found' });
-  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
-  if (p.is_approved) return res.status(400).json({ error: 'approved placements are locked' });
-  const idx = parseInt(req.params.idx);
-  const assignments = JSON.parse(p.assignments_json || '[]');
-  if (!assignments[idx]) return res.status(404).json({ error: 'assignment not found' });
-  const field = req.body.field;
-  const value = String(req.body.value || '');
+// Mutate a single assignment in place. Returns true if a valid change was applied.
+// Shared by the manual bed editor and the assistant's apply-changes endpoint so
+// both paths enforce identical validation.
+function applyAssignmentChange(assignments, idx, field, rawValue) {
+  if (!assignments[idx]) return false;
+  const value = String(rawValue == null ? '' : rawValue).trim();
   if (field === 'assignment') {
     const [team, category, gender] = value.split('||').map(v => String(v || '').trim());
     if (team && ['Athlete', 'Coach', 'Chaperone', 'Staff', 'Other'].includes(category) && ['Female', 'Male'].includes(gender)) {
@@ -709,14 +705,69 @@ function updatePlacementAssignment(req, res) {
       assignments[idx].category = category;
       assignments[idx].gender = gender;
       assignments[idx].label = `${shortTeamName(team)} ${category}`;
+      return true;
     }
+    return false;
   }
-  if (field === 'gender' && ['Female', 'Male'].includes(value)) assignments[idx].gender = value;
+  if (field === 'gender' && ['Female', 'Male'].includes(value)) {
+    assignments[idx].gender = value;
+    return true;
+  }
   if (field === 'category' && ['Athlete', 'Coach', 'Chaperone', 'Staff', 'Other'].includes(value)) {
     assignments[idx].category = value;
     const base = String(assignments[idx].label || '').replace(/ (Athlete|Coach|Chaperone|Staff|Other)$/, '');
     assignments[idx].label = `${base} ${value}`;
+    return true;
   }
+  return false;
+}
+
+// Locate the raw / blank / reference files backing a placement (session or location scoped).
+function placementFiles(p) {
+  const raw = p.session_id
+    ? db.prepare("SELECT * FROM location_files WHERE session_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(p.session_id)
+    : db.prepare("SELECT * FROM location_files WHERE location_id=? AND session_id IS NULL AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(p.location_id)
+      || db.prepare("SELECT * FROM location_files WHERE location_id=? AND kind='raw' ORDER BY uploaded_at DESC LIMIT 1").get(p.location_id);
+  const blank = db.prepare("SELECT * FROM location_files WHERE location_id=? AND session_id IS NULL AND kind='blank' ORDER BY uploaded_at DESC LIMIT 1").get(p.location_id);
+  const ref = db.prepare("SELECT * FROM location_files WHERE location_id=? AND session_id IS NULL AND kind='reference' ORDER BY uploaded_at DESC LIMIT 1").get(p.location_id);
+  return { raw, blank, ref };
+}
+
+// Re-check compliance and rewrite the placeholder workbook to match current assignments.
+async function refreshPlacement(p, assignments) {
+  const { raw, blank, ref } = placementFiles(p);
+  if (!raw || !blank) {
+    db.prepare('UPDATE placements SET assignments_json=? WHERE id=?').run(JSON.stringify(assignments), p.id);
+    return { recomputed: false };
+  }
+  const result = await recomputeAfterEdit(raw.blob, blank.blob, ref ? ref.blob : null, assignments);
+  const status = computeStatus({
+    compliance: result.compliance,
+    placed: result.placed,
+    beds: result.beds,
+    warnings: JSON.parse(p.warnings_json || '[]')
+  });
+  // Replace the placeholder output blob in place so the preview download stays current.
+  if (p.output_file_id) {
+    db.prepare('UPDATE location_files SET blob=?, size_bytes=?, uploaded_at=? WHERE id=?')
+      .run(result.outputBuffer, result.outputBuffer.length, Date.now(), p.output_file_id);
+  }
+  db.prepare('UPDATE placements SET assignments_json=?, compliance_json=?, status=? WHERE id=?')
+    .run(JSON.stringify(assignments), JSON.stringify(result.compliance), status, p.id);
+  if (p.session_id) db.prepare('UPDATE sessions SET status=?, updated_at=? WHERE id=?').run(status, Date.now(), p.session_id);
+  else db.prepare('UPDATE locations SET status=?, updated_at=? WHERE id=?').run(status, Date.now(), p.location_id);
+  return { recomputed: true, status, compliance: result.compliance };
+}
+
+function updatePlacementAssignment(req, res) {
+  const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: 'not found' });
+  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
+  if (p.is_approved) return res.status(400).json({ error: 'approved placements are locked' });
+  const idx = parseInt(req.params.idx);
+  const assignments = JSON.parse(p.assignments_json || '[]');
+  if (!assignments[idx]) return res.status(404).json({ error: 'assignment not found' });
+  applyAssignmentChange(assignments, idx, req.body.field, req.body.value);
   db.prepare('UPDATE placements SET assignments_json=? WHERE id=?').run(JSON.stringify(assignments), p.id);
   res.json({ ok: true });
 }
@@ -772,24 +823,97 @@ app.post('/api/placements/:id/finalize', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/locations/:id/chat', requireAuth, async (req, res) => {
-  const id = parseInt(req.params.id);
-  const loc = getAccessibleLocation(req, id);
-  if (!loc) return res.status(404).json({ error: 'not found' });
+// Chat history is scoped to the placement's session (preferred) or location.
+function chatScope(p) {
+  return p.session_id ? { col: 'session_id', val: p.session_id } : { col: 'location_id', val: p.location_id };
+}
+function loadChatHistory(p, limit = 12) {
+  const s = chatScope(p);
+  const rows = db.prepare(
+    `SELECT role, content, created_at FROM chat_messages WHERE ${s.col}=? ORDER BY created_at DESC LIMIT ?`
+  ).all(s.val, limit);
+  return rows.reverse();
+}
+function saveChatMessage(p, userId, role, content) {
+  db.prepare('INSERT INTO chat_messages (location_id, session_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(p.location_id, p.session_id || null, userId, role, content, Date.now());
+}
+
+// Build the compact placement context the assistant reasons over.
+function assistantContext(p) {
+  const roster = rawRosterForPlacement(p);
+  const inventory = templateInventoryForLocation(p.location_id);
+  const assignments = enrichAssignments(JSON.parse(p.assignments_json || '[]'), p, roster.accounts, inventory);
+  let conditions = '';
+  if (p.session_id) {
+    const srow = db.prepare('SELECT notes FROM sessions WHERE id=?').get(p.session_id);
+    conditions = (srow && srow.notes) || '';
+  }
+  return {
+    conditions,
+    assignments,
+    compliance: JSON.parse(p.compliance_json || '{}'),
+    warnings: JSON.parse(p.warnings_json || '[]'),
+    roster: roster.summary,
+    inventory: { halls: inventory.halls }
+  };
+}
+
+app.get('/api/placements/:id/chat', requireAuth, (req, res) => {
+  const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: 'not found' });
+  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
+  res.json({ messages: loadChatHistory(p, 40) });
+});
+
+app.post('/api/placements/:id/chat', requireAuth, async (req, res) => {
+  const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: 'not found' });
+  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
   const message = String((req.body || {}).message || '').trim();
   if (!message) return res.status(400).json({ error: 'message required' });
-  db.prepare('INSERT INTO chat_messages (location_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(id, req.session.userId, 'user', message, Date.now());
-  const p = db.prepare('SELECT * FROM placements WHERE location_id=? ORDER BY run_at DESC LIMIT 1').get(id);
-  const placement = p ? { ...p, warnings: JSON.parse(p.warnings_json || '[]'), compliance: JSON.parse(p.compliance_json || '{}') } : null;
-  const result = await askPlacementAssistant({ message, location: loc, placement });
-  db.prepare('INSERT INTO chat_messages (location_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(id, null, 'assistant', result.reply, Date.now());
+
+  const history = loadChatHistory(p, 12);
+  saveChatMessage(p, req.session.userId, 'user', message);
+
+  const ctx = assistantContext(p);
+  let result;
+  try {
+    result = await askPlacementAssistant({ message, history, ...ctx });
+  } catch (e) {
+    console.error('assistant failed:', e);
+    return res.status(500).json({ error: 'assistant failed', message: e.message });
+  }
+  saveChatMessage(p, null, 'assistant', result.reply);
   res.json(result);
 });
 
-app.post('/api/placements/:id/apply-changes', requireAuth, (req, res) => {
-  res.status(501).json({ error: 'AI change application is not automated yet. Apply edits in the review table.' });
+app.post('/api/placements/:id/apply-changes', requireAuth, async (req, res) => {
+  const p = db.prepare('SELECT * FROM placements WHERE id=?').get(parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: 'not found' });
+  if (!canManagePlacement(req, p)) return res.status(403).json({ error: 'not allowed' });
+  if (p.is_approved) return res.status(409).json({ error: 'placement is approved and locked', locked: true });
+
+  const changes = Array.isArray((req.body || {}).changes) ? req.body.changes : [];
+  if (!changes.length) return res.status(400).json({ error: 'no changes supplied' });
+
+  const assignments = JSON.parse(p.assignments_json || '[]');
+  let applied = 0;
+  const rejected = [];
+  for (const c of changes) {
+    const idx = Number(c.idx);
+    if (applyAssignmentChange(assignments, idx, c.field, c.value)) applied++;
+    else rejected.push(idx);
+  }
+  if (!applied) return res.status(400).json({ error: 'no valid changes applied', rejected });
+
+  try {
+    const r = await refreshPlacement(p, assignments);
+    res.json({ ok: true, applied, rejected, status: r.status, compliance: r.compliance, recomputed: r.recomputed });
+  } catch (e) {
+    console.error('apply-changes recompute failed:', e);
+    res.status(500).json({ error: 'apply failed', message: e.message });
+  }
 });
 
 // ---------- static + routing ----------
