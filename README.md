@@ -56,7 +56,7 @@ Render Starter plan with a `/data` persistent disk. `render.yaml` is in the repo
 **Environment variables:**
 - `PORT`, `SESSION_SECRET`, `DATA_DIR=/data`, `NODE_ENV=production`, `APP_URL=https://your-domain`
 - *First boot only:* `PARKER_EMAIL`, `PARKER_PW` (seeds the initial admin)
-- *Optional:* `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL=claude-sonnet-4-20250514` for AI chat, `RESEND_API_KEY` + `MAIL_FROM` for emails
+- *Optional:* `OPENAI_API_KEY` + `OPENAI_MODEL=gpt-4.1-mini` for AI chat, `RESEND_API_KEY` + `MAIL_FROM` for emails
 
 Default admin (first boot, override with env vars): **pjackson@varsity.com / Varsity2026**
 
@@ -66,4 +66,4 @@ Default admin (first boot, override with env vars): **pjackson@varsity.com / Var
 
 ## Tech stack
 
-Express · express-session · better-sqlite3 (WAL) · bcryptjs · multer · SheetJS (xlsx) · JSZip · connect-sqlite3 · Anthropic API · Resend
+Express · express-session · better-sqlite3 (WAL) · bcryptjs · multer · SheetJS (xlsx) · JSZip · connect-sqlite3 · OpenAI API · Resend

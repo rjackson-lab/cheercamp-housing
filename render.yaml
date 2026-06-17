@@ -22,8 +22,10 @@ services:
       - key: APP_URL
         sync: false
       # Optional — set these in Render dashboard to enable AI chat + emails
-      - key: ANTHROPIC_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM
