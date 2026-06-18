@@ -26,7 +26,7 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/healthz', (req, res) => {
   try {
     db.prepare('SELECT 1').get();
-    res.json({ ok: true });
+    res.json({ ok: true, ai_configured: Boolean(process.env.OPENAI_API_KEY) });
   } catch (e) {
     res.status(500).json({ ok: false });
   }
